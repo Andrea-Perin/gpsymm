@@ -52,6 +52,7 @@ ax.annotate( r'$\hat{y}(x_0)$', (xpred, ypred), (xpred+.2, ypred), arrowprops=di
 ax.annotate( r'$y_0$', (xpred, ytrue), (xpred+.2, ytrue-.5), arrowprops=dict(arrowstyle="-", connectionstyle="arc3,rad=-0.2", shrinkB=5))
 ax.set_xlabel('x')
 ax.set_ylabel('y')
+# plt.tight_layout()
 plt.savefig('images/fig2_panelA.pdf')
 plt.show()
 
@@ -60,13 +61,22 @@ plt.show()
 figsize = (5*cm, 5*cm)
 fig, ax = plt.subplots(figsize=figsize)
 ax.set_axis_off()
-ax.imshow(k, cmap='cividis')
+k_circ = jax.vmap(jnp.roll)(
+    ein.repeat(
+        ein.reduce(
+            jax.vmap(jnp.roll)(k, -jnp.arange(len(k))),
+            'rows cols -> cols',
+            'mean'),
+        'cols -> rows cols',
+        rows=len(k)),
+    jnp.arange(len(k)))
+ax.imshow(k_circ, cmap='cividis')
 rect1 = Rectangle( (-.5, N//2-.5), width=N, height=1, linewidth=1, edgecolor=colors[0], facecolor='none')
 rect2 = Rectangle( (N//2-.5, -.5), width=1, height=N, linewidth=1, edgecolor=colors[0], facecolor='none')
 ax.add_patch(rect1)
 ax.add_patch(rect2)
 ax.text(-1, N//2, r'$k(x_0, \vec{x}_\mathcal{D})$', horizontalalignment='right', verticalalignment='center', rotation=90)
 ax.text(N//2, -1, r'$k(\vec{x}_\mathcal{D}, x_0)$', horizontalalignment='center', verticalalignment='bottom')
-plt.tight_layout()
-plt.savefig('images/fig2_panelB.pdf')
+# plt.tight_layout()
+plt.savefig('images/fig2_panelB_circ.pdf')
 plt.show()
