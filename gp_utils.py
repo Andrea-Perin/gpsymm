@@ -12,7 +12,7 @@ def kreg(
     y: Float[Array, 'train 1'],
     reg: float = 1e-5) -> tuple[Float[Array, 'test 1'], Float[Array, 'test 1']]:
     """GP prediction"""
-    sol = jax.scipy.linalg.solve( k11 + reg*jnp.eye(len(k11)), k12, assume_a='sym' )
+    sol = jax.scipy.linalg.solve( k11 + reg*jnp.eye(len(k11)), k12, assume_a='pos' )
     mean = ein.einsum(sol, y, 'train test, train d-> test d')
     var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
     return mean, var
