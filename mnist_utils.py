@@ -1,5 +1,7 @@
 import gzip
 from jax import numpy as jnp
+from jaxtyping import Float, Array, UInt
+import einops as ein
 
 
 def load_images(img_path):
@@ -31,3 +33,47 @@ def load_labels(lab_path):
         label_data = f.read()
         labels = jnp.frombuffer(label_data, dtype=jnp.uint8)
         return labels
+
+
+def normalize_mnist(mnist: UInt[Array, '60000 28 28']) -> Float[Array, '60000 28 28']:
+    """
+    Normalize MNIST dataset images.
+
+    This function performs the following normalization steps:
+    1. Scales pixel values to the range [0, 1].
+    2. Subtracts the mean of each image.
+    3. Projects each image onto a unit sphere.
+
+    Args:
+        mnist (UInt[Array, '60000 28 28']):
+            The MNIST dataset as an unsigned integer array.
+            Shape: (60000, 28, 28), where:
+                - 60000 is the number of images
+                - 28x28 is the size of each image
+
+    Returns:
+        Float[Array, '60000 28 28']:
+            The normalized MNIST dataset as a float array.
+            Each image is centered around zero and projected onto a unit sphere.
+
+    Note:
+        This normalization ensures that all images have the same L2 norm,
+        which can be beneficial for certain machine learning algorithms.
+    """
+    mnist /= 255.
+    mean = ein.reduce(mnist, 'n w h -> n 1 1', 'mean')
+    mnist = mnist - mean
+    # project on sphere
+    norm = jnp.sqrt(ein.reduce(mnist**2, 'n w h -> n 1 1', 'sum'))
+    return mnist/norm
+
+
+# %%
+if __name__ == "__main__":
+    from pathlib import Path
+    labpath = Path('./data/MNIST/raw/train-labels-idx1-ubyte.gz')
+    imgpath = Path('./data/MNIST/raw/train-images-idx3-ubyte.gz')
+    images = load_images(img_path=imgpath)
+    normimgs = normalize_mnist(images)
+    check = ein.einsum(normimgs**2, 'n w h -> n')
+    assert jnp.allclose(jnp.ones_like(check), check)
