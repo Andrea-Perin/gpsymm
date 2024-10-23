@@ -1,5 +1,50 @@
-from jax import numpy as jnp, random as jr
+from jax import numpy as jnp, random as jr, vmap
 from jaxtyping import Array, Float
+from typing import Callable
+
+
+def kronmap(fn: Callable, nargs: int) -> Callable:
+    """
+    Create a Kronecker-mapped version of a function.
+
+    This decorator applies multiple vmaps to a function to create a Kronecker product-like
+    mapping over its arguments. The resulting function broadcasts the original function
+    over all possible combinations of its inputs.
+
+    Args:
+        fn (Callable): The function to be Kronecker-mapped.
+        nargs (int): The number of arguments in the function to be mapped over.
+
+    Returns:
+        Callable: A new function that applies the original function in a Kronecker product-like manner.
+
+    Example:
+        If fn(a, b, c) is a function of three arguments, then:
+        kronmapped = kronmap(fn, 3)
+        result = kronmapped(a, b, c)
+
+        This is equivalent to:
+        result[i, j, k] = fn(a[i], b[j], c[k])
+
+        for all possible combinations of i, j, and k.
+
+    Note:
+        - The decorated function will have the same number of arguments as the original function.
+        - Each argument should be an array-like object that can be indexed.
+        - The output will have a shape that is the concatenation of all input shapes.
+
+    Implementation details:
+        The function successively applies vmap to each argument, creating a chain of
+        mapped functions. Each application of vmap introduces a new batch dimension
+        in the output, corresponding to one of the input arguments.
+    """
+    for i in range(nargs):
+        fn = vmap(
+            fn,
+            in_axes=(None,) * i + (0,) + (None,) * (nargs-i-1),
+            out_axes=i
+        )
+    return fn
 
 
 def three_shear_rotate(img: Float[Array, 'd d'], theta: float) -> Float[Array, 'd d']:
@@ -14,37 +59,37 @@ def three_shear_rotate(img: Float[Array, 'd d'], theta: float) -> Float[Array, '
     ----------
     img : Float[Array, 'd d']
         A 2D array representing the input image, assumed to be square-shaped
-        and single-channel. The image is rotated in-place, where `d` is the 
+        and single-channel. The image is rotated in-place, where `d` is the
         dimension of the image (width and height).
-    
+
     theta : float
         The angle of rotation in radians.
     Returns
     -------
     Float[Array, 'd d']
-        The rotated image as a 2D array of the same shape as the input `img`. 
+        The rotated image as a 2D array of the same shape as the input `img`.
         Pixels outside the boundary of the original image are set to 0.
     Notes
     -----
     This method uses three shear transformations to rotate the image without
-    interpolation. The process ensures that no pixel values are altered, only 
+    interpolation. The process ensures that no pixel values are altered, only
     repositioned.
     Assumptions
     -----------
     - The input image is square-shaped.
     - The image has a single channel (grayscale).
-    
+
     This method may not work as intended for images that do not meet these
     assumptions.
     TODO
     ----
-    - Rewrite this function with `einops` instead of the current reshaping 
+    - Rewrite this function with `einops` instead of the current reshaping
       strategy to improve clarity and reduce reliance on manual reshaping.
     References
     ----------
     - See Tom Forsyth's article on the three-shear rotation method:
       https://cohost.org/tomforsyth/post/891823-rotation-with-three
-    
+
     Examples
     --------
     >>> import jax.numpy as jnp
@@ -118,3 +163,15 @@ def sgd_dataloader(xs, ys, batch_size, *, key):
             yield xs[batch_perm], ys[batch_perm]
             start = end
             end = start + batch_size
+
+
+if __name__ == "__main__":
+    def testfun(a, b):
+        return a*b
+
+    krontest = kronmap(testfun, 2)
+    a = jnp.linspace(0, 1, 100)
+    b = jnp.linspace(1, 2, 123)
+    out = krontest(a, b)
+    assert out.shape == (len(a), len(b))
+    assert out[1, 2] == a[1]*b[2]
