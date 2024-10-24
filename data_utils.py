@@ -1,6 +1,34 @@
+# %%
 from jax import numpy as jnp, random as jr, vmap
 from jaxtyping import Array, Float
 from typing import Callable
+
+
+def xshift_img(img: Float[Array, 'w h'], sfrac: float) -> Float[Array, 'w h']:
+    """
+    Shift an image horizontally in the Fourier domain.
+
+    This function performs a horizontal shift of an image by modifying its Fourier transform.
+    The shift is performed by applying a phase shift in the frequency domain, which allows
+    for sub-pixel shifts without interpolation artifacts.
+
+    Args:
+        img: A 2D array representing the input image with shape (width, height).
+        sfrac: The fraction of image width to shift by. Positive values shift right,
+               negative values shift left. A value of 1.0 shifts by the full image width.
+
+    Returns:
+        The shifted image as a 2D array of the same shape as the input.
+
+    Note:
+        This function uses the FFT method for shifting, which assumes periodic boundary
+        conditions. Content that shifts past one edge will appear on the opposite edge.
+    """
+    w = img.shape[1]
+    fftimg = jnp.fft.rfft2(img)
+    mag, ph = jnp.abs(fftimg), jnp.angle(fftimg)
+    phases = (2*jnp.pi*sfrac) * jnp.arange(w//2+1)
+    return jnp.fft.irfft2(mag*jnp.exp(-1j*(ph+phases)))
 
 
 def kronmap(fn: Callable, nargs: int) -> Callable:
@@ -166,6 +194,8 @@ def sgd_dataloader(xs, ys, batch_size, *, key):
 
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
     def testfun(a, b):
         return a*b
 
@@ -175,3 +205,19 @@ if __name__ == "__main__":
     out = krontest(a, b)
     assert out.shape == (len(a), len(b))
     assert out[1, 2] == a[1]*b[2]
+
+    # shift test
+    img = jnp.eye(10)
+    shifts = jnp.linspace(0, 1, 20, endpoint=False)
+    shifted_imgs = vmap(xshift_img, in_axes=(None, 0))(img, shifts)
+    # check integer pixel shifts
+    plt.imshow(shifted_imgs[0])
+    plt.show()
+    plt.imshow(shifted_imgs[2])
+    plt.show()
+    plt.imshow(shifted_imgs[-2])
+    plt.show()
+    # check fractional shifts
+    plt.imshow(shifted_imgs[1])
+    plt.colorbar()
+    plt.show()
