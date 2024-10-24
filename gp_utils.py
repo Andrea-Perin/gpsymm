@@ -1,9 +1,32 @@
 # %%
 import jax
 from jax import numpy as jnp
-from jaxtyping import Float, Array
+from jaxtyping import Float, Array, Scalar
 import equinox as eqx
 import einops as ein
+
+
+def extract_components(
+    k: Float[Array, "n n"],
+    i: int
+) -> tuple[Float[Array, "n-1 n-1"], Float[Array, "n-1"], Float[Array, '1 1']]:
+    """
+    Extract components from a covariance matrix by removing i-th row and column.
+
+    Args:
+        k: Square covariance matrix of shape (n, n)
+        i: Index of row/column to remove
+
+    Returns:
+        tuple containing:
+        - k_reduced: Covariance matrix with i-th row and column removed (n-1, n-1)
+        - k_cross: The i-th column with i-th element removed (n-1,)
+        - k_ii: The (i,i) element of the original matrix (scalar)
+    """
+    k_reduced = jnp.delete(jnp.delete(k, i, axis=0), i, axis=1)
+    k_cross = jnp.delete(k[:, i:i+1], i, axis=0)
+    return k_reduced, k_cross, k[i:i+1, i:i+1]
+
 
 def kreg(
     k11: Float[Array, 'train train'],
@@ -32,7 +55,7 @@ def kreg(
     return mean, var
 
 
-def circulant_error(k: Float[Array, 'n n'], reg: float = 1e-5) -> float:
+def circulant_error(k: Float[Array, 'n n'], reg: float = 1e-5) -> Scalar:
     """
     Calculate the prediction error for a 2-class setting with interleaved points.
 
@@ -48,7 +71,7 @@ def circulant_error(k: Float[Array, 'n n'], reg: float = 1e-5) -> float:
         float: The predicted error for the interleaved 2-class setting.
     """
     isp = 1 / jnp.abs(jnp.fft.fft(k[0]) + reg)
-    return float(isp[len(isp)//2]/jnp.mean(isp))
+    return isp[len(isp)//2]/jnp.mean(isp)
 
 
 def make_circulant(k: Float[Array, 'n n']) -> Float[Array, 'n n']:
@@ -86,9 +109,7 @@ if __name__ == "__main__":
     k = make_circulant(k)
 
     # Prepare train-test split
-    k_train_train = jnp.delete(jnp.delete(k, N//2, axis=0), N//2, axis=1)
-    k_train_test = jnp.delete(k[:, N//2:N//2+1], N//2, axis=0)
-    k_test_test = k[N//2:N//2+1, N//2:N//2+1]
+    k_train_train, k_train_test, k_test_test = extract_components(k, N//2)
     y_train = jnp.delete(ys, N//2, axis=0)
 
     # Perform GP regression
