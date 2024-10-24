@@ -9,7 +9,7 @@ import einops as ein
 def extract_components(
     k: Float[Array, "n n"],
     i: int
-) -> tuple[Float[Array, "n-1 n-1"], Float[Array, "n-1"], Float[Array, '1 1']]:
+) -> tuple[Float[Array, "n-1 n-1"], Float[Array, "n-1 1"], Float[Array, '1 1']]:
     """
     Extract components from a covariance matrix by removing i-th row and column.
 
@@ -20,12 +20,12 @@ def extract_components(
     Returns:
         tuple containing:
         - k_reduced: Covariance matrix with i-th row and column removed (n-1, n-1)
-        - k_cross: The i-th column with i-th element removed (n-1,)
-        - k_ii: The (i,i) element of the original matrix (scalar)
+        - k_cross: The i-th column with i-th element removed (n-1, 1)
+        - k_ii: The (i,i) element of the original matrix (1, 1)
     """
     k_reduced = jnp.delete(jnp.delete(k, i, axis=0), i, axis=1)
-    k_cross = jnp.delete(k[:, i:i+1], i, axis=0)
-    return k_reduced, k_cross, k[i:i+1, i:i+1]
+    k_cross = jnp.delete(k[:, [i]], i, axis=0)
+    return k_reduced, k_cross, k[[i], [i]]
 
 
 def kreg(
