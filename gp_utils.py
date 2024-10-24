@@ -51,7 +51,7 @@ def circulant_error(k: Float[Array, 'n n'], reg: float = 1e-5) -> float:
     return float(isp[len(isp)//2]/jnp.mean(isp))
 
 
-def make_circulant(cov: Float[Array, 'n n']) -> Float[Array, 'n n']:
+def make_circulant(k: Float[Array, 'n n']) -> Float[Array, 'n n']:
     """
     Convert a covariance matrix to a circulant matrix by averaging the diagonals.
 
