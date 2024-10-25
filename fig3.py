@@ -5,7 +5,7 @@ import numpy as np
 import einops as ein
 from jaxlib.xla_client import Layout
 from jaxtyping import Float, Array
-from gp_utils import kreg
+from gp_utils import kreg, extract_components, circulant_error, make_circulant
 import functools as ft
 
 import matplotlib
@@ -48,19 +48,18 @@ ys = [jnp.array([-1., 1.]*n)[:, None] for n in Ns]
 kernels = [get_k(data) for data in datasets]
 reg = 1e-5
 
-errors = []
+
+errors, our_errors = [], []
 for k, y, n in zip(kernels, ys, Ns):
-    k_train_train = jnp.delete(jnp.delete(k, n//2, 1), n//2, 0)
-    k_train_test = jnp.delete(k[:, n//2:n//2+1], n//2, 0)
-    k_test_test = k[n//2:n//2+1, n//2:n//2+1]
+    # empirical errors
+    k_train_train, k_train_test, k_test_test = extract_components(k, n//2)
     y_train = jnp.delete(y, n//2, axis=0)
     ymean, yvar = kreg(k_train_train, k_train_test, k_test_test, y_train, reg=reg)
     errors.append(jnp.abs(y[n//2] - ymean))
+    # spectral errors
+    our_errors.append(circulant_error(k, reg=reg))
 errors = jnp.array(errors).flatten()
-# compute theory errors according to our formula as well.
-# Divide reg factor by sqrt(N), due to orthogonal normalization of rfft
-isp = [1/(jnp.abs(orthofft(k[0]))+(reg/jnp.sqrt(len(k)))) for k in kernels]
-our_errors = jnp.array([s[len(s)//2]/jnp.mean(s) for s in isp]).flatten()
+our_errors = jnp.array(our_errors).flatten()
 
 
 # %% PANEL B
@@ -73,7 +72,7 @@ ax.set_xticks([Ns[0], 25, 50])
 ax.set_title(', '.join((f'$L={L}$', f'$\Delta={d}$')))
 ax.legend()
 plt.tight_layout()
-plt.savefig('images/fig3_panelB.pdf')
+# plt.savefig('images/fig3_panelB.pdf')
 plt.show()
 
 
@@ -156,7 +155,7 @@ for axidx, idx in enumerate(idxs_to_plot):
 fig.supylabel(r'$\lambda^{-1}$', x=0.1, y=.3, ha='center')
 fig.supxlabel('Frequency', ha='center', y=0.09)
 plt.tight_layout()
-plt.savefig('images/fig3_panelsAC.pdf')
+# plt.savefig('images/fig3_panelsAC.pdf')
 plt.show()
 
 
@@ -172,20 +171,17 @@ datasets = [get_data(N, d, r) for d in ds]
 ys = jnp.array([-1., 1.]*N)[:, None]
 kernels = [get_k(data) for data in datasets]
 
-errors = []
+errors, our_errors = [], []
 for k in kernels:
-    k_train_train = jnp.delete(jnp.delete(k, N//2, 1), N//2, 0)
-    k_train_test = jnp.delete(k[:, N//2:N//2+1], N//2, 0)
-    k_test_test = k[N//2:N//2+1, N//2:N//2+1]
+    # empirical errors
+    k_train_train, k_train_test, k_test_test = extract_components(k, N//2)
     y_train = jnp.delete(ys, N//2, axis=0)
     ymean, yvar = kreg(k_train_train, k_train_test, k_test_test, y_train, reg=reg)
     errors.append(jnp.abs(ys[N//2] - ymean))
-
+    # spectral errors
+    our_errors.append(circulant_error(k, reg=reg))
 errors = jnp.array(errors).flatten()
-# compute theory errors according to our formula as well.
-# Divide reg factor by sqrt(N), due to orthogonal normalization of rfft
-isp = [1/(jnp.abs(orthofft(k[0]))+(reg/jnp.sqrt(len(k)))) for k in kernels]
-our_errors = jnp.array([s[len(s)//2]/jnp.mean(s) for s in isp]).flatten()
+our_errors = jnp.array(our_errors).flatten()
 
 
 # %% DF PANELS TOGETHER, BUT NICE
@@ -242,7 +238,7 @@ for axidx, idx in enumerate(idxs_to_plot):
 fig.supylabel(r'$\lambda^{-1}$', x=0.1, y=.3, ha='center')
 fig.supxlabel('Frequency', ha='center', y=0.09)
 plt.tight_layout()
-plt.savefig('images/fig3_panelsDF.pdf')
+# plt.savefig('images/fig3_panelsDF.pdf')
 plt.show()
 
 
@@ -256,5 +252,5 @@ ax.set_ylabel(r'$\log(\varepsilon)$', ha='left', rotation=0, y=1, labelpad=0)
 ax.set_title(', '.join((f'$L={L}$', f'$N_{{rot}}={N}$')))
 ax.legend()
 plt.tight_layout()
-plt.savefig('images/fig3_panelE.pdf')
+# plt.savefig('images/fig3_panelE.pdf')
 plt.show()
