@@ -96,8 +96,11 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     # Set up test parameters
-    N = 11  # keep this to even values
-    L = 10
+    # Set N to even values, so that the problem can be made circulant in a
+    # meaningful way. Otherwise, the two values at the left and right extremes
+    # will be the same, and periodicity is then broken
+    N = 6
+    L = 1
     reg = 1e-5
 
     # Generate test data
