@@ -35,3 +35,6 @@ xtick.direction : out
 ytick.labelsize : 10
 ytick.color : (0.2,0.2,0.2)
 ytick.direction : out
+
+# IMAGE
+image.cmap: cividis
