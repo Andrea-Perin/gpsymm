@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
+from matplotlib.offsetbox import AnchoredText
+from matplotlib.patheffects import withStroke
 
 # Define some constants to be shared by the plots
 cm = 1/2.54
@@ -26,3 +28,22 @@ def cloudplot(xvals, yvals, cvals, xlabel, ylabel, clabel, titles, figsize):
     cbar = ax.cax.colorbar(plt.cm.ScalarMappable(cmap=im.get_cmap(), norm=im.norm))
     cbar.set_label(clabel)
     return fig
+
+
+def add_inner_title(ax, title, loc, **kwargs):
+    prop = dict(path_effects=[withStroke(foreground='w', linewidth=3)],
+                size=plt.rcParams['legend.fontsize'])
+    at = AnchoredText(title, loc=loc, prop=prop,
+                      pad=0., borderpad=0.5,
+                      frameon=True, **kwargs)
+    ax.add_artist(at)
+    return at
+
+
+def add_spines(ax):
+    ax.spines['top'].set_visible(True)
+    ax.spines['right'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['left'].set_visible(True)
+    ax.set_xticks([])
+    ax.set_yticks([])

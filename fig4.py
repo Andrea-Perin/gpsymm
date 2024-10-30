@@ -14,11 +14,13 @@ from pathlib import Path
 from mnist_utils import load_images, load_labels, normalize_mnist
 from data_utils import three_shear_rotate, xshift_img, kronmap
 from gp_utils import kreg, circulant_error, make_circulant, extract_components
-from plot_utils import cm, cloudplot
+from plot_utils import cm, cloudplot, add_spines
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, InsetPosition
 from mpl_toolkits.axes_grid1 import ImageGrid
+from matplotlib.patheffects import withStroke
 plt.style.use('myplots.mlpstyle')
 plt.set_cmap('viridis')
 
@@ -27,7 +29,7 @@ plt.set_cmap('viridis')
 SEED = 124
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 2_000
+N_PAIRS = 5_000
 REG = 1e-5
 N_PCS = 3
 out_path = Path('images/fig4')
@@ -46,6 +48,8 @@ W_std, b_std = 1., 1.
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
+    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
@@ -53,8 +57,9 @@ kernel_fn = jax.jit(kernel_fn)
 
 # %% PANEL A to start
 label_a, label_b = 4, 7
+digit_selector = 10
 angles = jnp.linspace(0, 1, angles_panel_a:=360, endpoint=False) * jnp.pi * 2
-digit_a = images[labels == label_a][:1]
+digit_a = images[labels == label_a][digit_selector:digit_selector+1]
 digit_b = images[labels == label_b][:1]
 digit_a_orbits = make_orbit(digit_a, angles)
 digit_b_orbits = make_orbit(digit_b, angles)
@@ -62,31 +67,47 @@ data, ps = ein.pack( (digit_a_orbits[0], digit_b_orbits[0]), '* n w h' )
 data = ein.rearrange(data, 'd n w h -> (n d) (w h)')
 u, s, vh = jnp.linalg.svd(data,  full_matrices=True)
 pcs = ein.einsum(u[:, :N_PCS], s[:N_PCS], 'i j, j -> i j')
-
-fig = plt.figure(figsize=(5*cm, 5*cm))
-ax = fig.add_subplot(111, projection='3d')
 # Main scatter plot
-ax.scatter(pcs[::2, 0], pcs[::2, 1], pcs[::2, 2], s=2, label=label_a)
-ax.scatter(pcs[1::2, 0], pcs[1::2, 1], pcs[1::2, 2], s=2, label=label_b)
-ax.text2D(0.20, 0.05, "PC1", transform=ax.transAxes)
-ax.text2D(0.80, 0.1, "PC2", transform=ax.transAxes)
-ax.text2D(1., 0.55, "PC3", transform=ax.transAxes)
-# Create two inset axes
-# Parameters are [loc, width%, height%] relative to parent axes
-inset1 = ax.inset_axes([0.15, 0.75, 0.15, 0.15])
-inset2 = ax.inset_axes([0.60, 0.75, 0.15, 0.15])
+fig = plt.figure(figsize=(5.75*cm, 5*cm))
+ax = fig.add_subplot(111, projection='3d')
+ax.set_position((0, 0, 1, 1))
+step = 360//8
+looped_a, ps = ein.pack((pcs[::2*step], pcs[:1]), '* d')
+looped_b, ps = ein.pack((pcs[1::2*step], pcs[1:2]), '* d')
+ax.plot(looped_a[:, 0], looped_b[:, 1], looped_a[:, 2], 'o--', lw=.3, markersize=1.5, label=label_a)
+ax.plot(looped_b[:, 0], looped_b[:, 1], looped_b[:, 2], 'o--', lw=.3, markersize=1.5, label=label_b)
+# show PCA basis elements
+vmax = max(float(vh[:3].max()), float(-vh[:3].min()))
+vmin = -vmax
+inset_pc1 = ax.inset_axes((.25, 0.1, 0.15, 0.15), transform=ax.transAxes)
+inset_pc1.set_title("PC1", fontsize=10, y= -.5, va='center', transform=inset_pc1.transAxes)
+add_spines(inset_pc1)
+inset_pc1.imshow(-vh[0].reshape(28, 28), cmap='RdBu', vmin=vmin, vmax=vmax)  # adjust index as needed
+
+inset_pc2 = ax.inset_axes((.75, 0.1, 0.15, 0.15))
+inset_pc2.set_title("PC2", fontsize=10, y=-.5, va='center', transform=inset_pc2.transAxes)
+add_spines(inset_pc2)
+inset_pc2.imshow(vh[1].reshape(28, 28), cmap='RdBu', vmin=vmin, vmax=vmax)  # adjust index as needed
+
+inset_pc3 = ax.inset_axes((.9, 0.5, 0.15, 0.15))
+inset_pc3.set_title("PC3", fontsize=10, y=-.5, va='center', transform=inset_pc3.transAxes,
+    path_effects=[withStroke(linewidth=3, foreground='w')])
+add_spines(inset_pc3)
+inset_pc3.imshow(vh[2].reshape(28, 28), cmap='RdBu', vmin=vmin, vmax=vmax)  # adjust index as needed
+# Show digits
+inset1 = ax.inset_axes((0.3, 0.75, 0.15, 0.15))
+inset1.set_axis_off()
+inset1.imshow(digit_a[0], cmap='gray')
+inset2 = ax.inset_axes((0.70, 0.75, 0.15, 0.15))
+inset2.set_axis_off()
+inset2.imshow(digit_b[0], cmap='gray')
 # Plot images in insets
-inset1.imshow(digit_a[0], cmap='gray')  # adjust index as needed
-inset2.imshow(digit_b[0], cmap='gray')  # adjust index as needed
 ax.set_xticks([])
 ax.set_yticks([])
 ax.set_zticks([])
-inset1.set_xticks([])
-inset1.set_yticks([])
-inset2.set_xticks([])
-inset2.set_yticks([])
-plt.tight_layout()
-plt.savefig(out_path / 'panelA.pdf')
+fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+plt.tight_layout(pad=0)
+plt.savefig(out_path / 'panelA_8angles.pdf', bbox_inches='tight') #, pad_inches=0)
 plt.show()
 
 
@@ -121,23 +142,28 @@ def get_deltasq(data: Float[Array, 'pair (angle digit) (width height)']) -> Floa
 
 
 @jax.jit
+def get_projected_radius(data: Float[Array, 'pair (angle digit) (width height)']) -> Float[Array, 'pair']:
+    rearranged = ein.rearrange(data, 'pair (angle digit) wh -> digit pair angle wh', digit=2)
+    centers = ein.reduce(rearranged, 'digit pair angle wh -> digit pair wh', 'mean')
+    radii_sq = ein.einsum((rearranged[..., 0, :] - centers)**2, 'digit pair wh -> digit pair')
+    return ein.reduce(jnp.sqrt(radii_sq), 'digit pair -> pair', 'mean')
+
+
+@jax.jit
 def get_symm_empirical_error(
     k: Float[Array, 'n n'],
     ys: Float[Array, 'n 1'],
     reg: float=REG
-) -> Scalar:
-    error = 0.
+) -> Float[Array, '2']:
     # for first class
     cov_components = extract_components(k, 0)
-    y_train = ys[1:]
-    y_pred, _ = kreg(*cov_components, y_train, reg=reg)
-    error += jnp.abs(ys[0] - y_pred).squeeze()
+    y_train = jnp.delete(ys, 0, axis=0)
+    y_pred_0, _ = kreg(*cov_components, y_train, reg=reg)
     # for second class
-    cov_components = extract_components(k, -1)
-    y_train = ys[:-1]
-    y_pred, _ = kreg(*cov_components, y_train, reg=reg)
-    error += jnp.abs(ys[-1] - y_pred).squeeze()
-    return error / 2.
+    cov_components = extract_components(k, 1)
+    y_train = jnp.delete(ys, 1, axis=0)
+    y_pred_1, _ = kreg(*cov_components, y_train, reg=reg)
+    return jnp.concat((y_pred_0, y_pred_1))
 
 
 def make_custom_circulant(k: Float[Array, 'n n']) -> Float[Array, 'n n']:
@@ -174,30 +200,39 @@ def make_custom_circulant(k: Float[Array, 'n n']) -> Float[Array, 'n n']:
     return out
 
 
-results_names = ( 'deltasq', 'sp_errs', 'em_errs', 'lambda_last', 'lambda_avg_no_last')
+results_names = ( 'deltasq', 'sp_errs', 'em_errs', 'lambda_last', 'lambda_avg_no_last', 'lambda_avg', 'proj_radius', 'avg_angle', 'counts')
 results_shape = (len(results_names), len(N_ROTATIONS), N_PAIRS)
 results = np.empty(results_shape)
 keys = jr.split(RNG, len(N_ROTATIONS))
 for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROTATIONS)):
     data = get_data(key, n_rot)
     deltasq = get_deltasq(data)
+    proj_radius = get_projected_radius(data)
     kernels = jax.vmap(kernel_fn)(data, data).ntk
     # computation of empirical errors, done as average over both classes
     ys = jnp.array([+1., -1.]*n_rot)[:, None]
-    empirical_errors = jax.vmap(get_symm_empirical_error, in_axes=(0, None))(kernels, ys)
+    empirical_results = jax.vmap(get_symm_empirical_error, in_axes=(0, None))(kernels, ys)
+    empirical_errors = ein.reduce(jnp.abs(empirical_results-ys[:2]), 'n p 1 -> n', 'mean')
+    empirical_correct_preds = ein.reduce( jnp.sign(empirical_results) == ys[:2], 'n d 1 -> n', 'sum' )
     # computation of spectral errors
     ckernels = jax.vmap(make_circulant)(kernels)
     spectral_errors = jax.vmap(circulant_error)(ckernels)
+    # avg angle? (AR+BR)/2
+    avg_angle = ein.reduce(ckernels[:, 0, 2::2], 'n k -> n', 'mean')
     # computation of elements of the inverse spectrum. NOTE THE REGULARIZATION
     # CONSTANT: see https://numpy.org/doc/stable/reference/routines.fft.html#normalization
     isp = 1/jnp.abs(jax.vmap(orthofft)(ckernels[:, 0]) + REG*jnp.sqrt(2*n_rot))
-    # isp = 1/jnp.abs(jax.vmap(jnp.fft.fft)(ckernels[:, 0]) + REG)
     lambda_last = isp[:, n_rot]
-    lambda_avg_no_last = ein.reduce(isp[:, :-1], 'n d -> n', 'mean')
+    lambda_avg_no_last = ein.reduce(jnp.delete(isp, n_rot, axis=1), 'n d -> n', 'mean')
+    lambda_avg = ein.reduce(isp, 'n d -> n', 'mean')
     # loading of results
-    results[:, idx] = deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last
+    results[:, idx] = deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lambda_avg, proj_radius, avg_angle, empirical_correct_preds
 
-deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last = results
+deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lambda_avg, proj_radius, avg_angle, emp_counts = results
+# additional division of lambda_last by sqrt(N)
+# This makes relationships "more linear" in the following plots
+# We are still unsure of the reason for this behavior
+lambda_last *= jnp.sqrt(jnp.array(N_ROTATIONS)[:, None])
 
 # %% PANEL B
 fig = plt.figure(figsize=(12*cm, 5*cm))
@@ -226,7 +261,7 @@ cbar = grid.cbar_axes[0].colorbar(
 cbar.set_label('$\log\Delta^2$')
 plt.set_cmap('viridis')
 plt.tight_layout()
-plt.savefig(out_path / 'panelB.pdf')
+# plt.savefig(out_path / 'panelB_v1.pdf')
 plt.show()
 
 # %% PANEL C
@@ -246,13 +281,13 @@ for ax in fig.get_axes()[:len(N_ROTATIONS)]:
 fig.supxlabel('Empirical error', y=.12, fontsize=10)
 fig.supylabel('Spectral error', x=.05, y=0.59, fontsize=10)
 plt.tight_layout()
-plt.savefig(out_path / 'panelC.pdf')
+# plt.savefig(out_path / 'panelC_v1.pdf')
 plt.show()
 
 # %% PANEL D
 fig = cloudplot(
     deltasq,
-    1/lambda_last,
+    (1/lambda_last),
     jnp.log(spectral_errors),
     xlabel=(XLAB:='$\Delta^2$'),
     ylabel=(YLAB:='$\lambda_N$'),
@@ -263,13 +298,13 @@ fig = cloudplot(
 fig.supxlabel(XLAB, y=.15)
 fig.supylabel(YLAB, x=0.03, y=.55)
 plt.tight_layout()
-plt.savefig(out_path / 'panelD.pdf')
+# plt.savefig(out_path / 'panelD_v1.pdf')
 plt.show()
 
 # %% PANEL E
-rot_idx = 0
+rot_idx = 1
 ll = lambda_last[rot_idx]
-lnl = lambda_avg_no_last[rot_idx]
+lnl = lambda_avg[rot_idx]
 spec_errs = spectral_errors[rot_idx]
 emp_errs = empirical_errors[rot_idx]
 
@@ -282,19 +317,31 @@ xi, yi = np.meshgrid(xi, yi)
 zi_spec = griddata((ll, lnl), spec_errs, (xi, yi), method='linear')
 zi_emp = griddata((ll, lnl), emp_errs, (xi, yi), method='linear')
 
+
+def add_inner_title(ax, title, loc, **kwargs):
+    from matplotlib.offsetbox import AnchoredText
+    from matplotlib.patheffects import withStroke
+    prop = dict(path_effects=[withStroke(foreground='w', linewidth=3)],
+                size=plt.rcParams['legend.fontsize'])
+    at = AnchoredText(title, loc=loc, prop=prop,
+                      pad=0., borderpad=0.5,
+                      frameon=False, **kwargs)
+    ax.add_artist(at)
+    return at
+
 # Create figure with ImageGrid
-fig = plt.figure(figsize=((17/2.5)*cm, 4*cm))
-fig.suptitle(f'$N_{{rot}}={N_ROTATIONS[rot_idx]}$', y=1.01, x=0, fontsize=10)
+titlestr = f'$N_{{rot}}={N_ROTATIONS[rot_idx]}$'
+fig = plt.figure(figsize=(5*cm, 10*cm))
 grid = ImageGrid(
     fig, 111,
-    nrows_ncols=(1, 2),
+    nrows_ncols=(2, 1),
     axes_pad=0.05,
     label_mode="L",
     share_all=True,
     aspect=False,
-    cbar_location="right",
+    cbar_location="top",
     cbar_mode="single",
-    cbar_size="10%",
+    cbar_size="5%",
     cbar_pad=0.05
 )
 # Plot spectral errors
@@ -302,16 +349,135 @@ vmin = min(np.nanmin(zi_spec), np.nanmin(zi_emp))
 vmax = max(np.nanmax(zi_spec), np.nanmax(zi_emp))
 im1 = grid[0].contourf(xi, yi, zi_spec, levels=10, cmap='viridis', vmin=vmin, vmax=vmax)
 grid[0].set_xlabel(r'$\lambda^{-1}_{N}$')
-grid[0].set_ylabel(r'$\langle\lambda^{-1}_{:N}\rangle$')
-grid[0].set_title('Spectral error', fontsize=10)
+grid[0].set_ylabel(r'$\langle\lambda^{-1}\rangle$')
+add_inner_title(grid[0], 'Spectral error', loc='upper right')
+add_inner_title(grid[0], titlestr, loc='lower right')
+# grid[0].set_title('Spectral error', fontsize=10)
+for tick in grid[0].get_yticklabels():
+    tick.set_rotation(90)
+    tick.set_verticalalignment('center')
 # Plot empirical errors
 im2 = grid[1].contourf(xi, yi, zi_emp, levels=10, cmap='viridis', vmin=vmin, vmax=vmax)
 grid[1].set_xlabel('$\lambda^{-1}_{N}$')
-grid[1].set_title('Empirical error', fontsize=10)
+grid[1].set_ylabel(r'$\langle\lambda^{-1}\rangle$')
+add_inner_title(grid[1], 'Empirical error', loc='upper right')
+add_inner_title(grid[1], titlestr, loc='lower right')
+# grid[1].set_title('Empirical error', fontsize=10)
+for tick in grid[1].get_yticklabels():
+    tick.set_rotation(90)
+    tick.set_verticalalignment('center')
 # Add colorbar
-cbar = grid.cbar_axes[0].colorbar(im2)
+cbar = grid.cbar_axes[0].colorbar(im1)
 cbar.set_label('Error magnitude')
 # Adjust the layout manually
-plt.subplots_adjust(left=0.15, right=0.85, bottom=0.2, top=0.85)
-plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0.1)
+# plt.subplots_adjust(left=0.15, right=0.85, bottom=0.2, top=0.85)
+plt.subplots_adjust(top=1, bottom=0, wspace=0, hspace=0)
+plt.tight_layout(pad=0)
+plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0)
+plt.show()
+
+# %% PANEL B: v2
+basecmap = plt.get_cmap('RdYlGn')
+colors = [basecmap(i) for i in range(basecmap.N)]
+semaphore = mpl.colors.LinearSegmentedColormap.from_list( 'Semaphore', colors, basecmap.N )
+bounds = jnp.linspace(0, 3, 4)
+norm = mpl.colors.BoundaryNorm(bounds, semaphore.N)
+
+fig = plt.figure(figsize=(5.75*cm, 5*cm))
+grid = ImageGrid(
+    fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
+    cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
+grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
+grid[0].set_xlabel("Empirical error")
+grid[0].set_ylabel("Spectral error")
+im = grid[0].scatter(
+    empirical_errors[rot_idx],
+    spectral_errors[rot_idx],
+    c=emp_counts[rot_idx],
+    marker='.', alpha=.1, s=2,
+    cmap=semaphore, norm=norm
+)
+cbar = grid.cbar_axes[0].colorbar(
+    plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()),
+    label='Num. correct',
+    ticks=[0.5, 1.5, 2.5],
+    alpha=1.0
+)
+cbar.ax.tick_params(size=0)
+cbar.ax.set_yticklabels((0, 1, 2))
+
+cmax = max(empirical_errors[rot_idx].max(), spectral_errors[rot_idx].max())
+grid[0].plot([0, cmax], [0, cmax], color='black', alpha=1, lw=.75, ls='--')
+grid[0].set_xticks([0., 0.5, 1., 1.5])
+grid[0].set_xlim((0, None))
+grid[0].set_ylim((0, None))
+plt.tight_layout(pad=0.4)
+plt.savefig(out_path / f'panelB_semaphore_{N_ROTATIONS[rot_idx]}.pdf')
+plt.show()
+# %% PANEL C: v2
+fig = plt.figure(figsize=(5.75*cm, 5*cm))
+grid = ImageGrid(
+    fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
+    cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
+# grid[0].ticklabel_format(axis='x', style='sci', scilimits=(0,0))
+grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
+grid[0].set_ylabel(r"$\Delta^2$")
+grid[0].set_xlabel(r"$\lambda_N$")
+im = grid[0].scatter(
+    (1/lambda_last[rot_idx]),
+    deltasq[rot_idx],
+    c=jnp.log(spectral_errors[rot_idx]),
+    marker='.', alpha=.1, s=2)
+cbar = grid.cbar_axes[0].colorbar(
+    plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()), alpha=1.0
+)
+cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
+grid[0].yaxis.set_tick_params(rotation=90)
+plt.tight_layout(pad=0.4)
+plt.savefig(out_path / f'panelC_{N_ROTATIONS[rot_idx]}.pdf')
+plt.show()
+
+# %% PANEL D: v2
+fig = plt.figure(figsize=(5.75*cm, 5*cm))
+grid = ImageGrid(
+    fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
+    cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
+grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
+grid[0].set_ylabel(r"$1/\rho$")
+grid[0].set_xlabel(r"$\langle\lambda^{-1}\rangle$")
+im = grid[0].scatter(
+    # jnp.sqrt(lambda_avg[rot_idx]),
+    lambda_avg[rot_idx],
+    1/proj_radius[rot_idx],
+    # avg_angle[rot_idx],
+    c=jnp.log(spectral_errors[rot_idx]),
+    marker='.', alpha=.1, s=2)
+cbar = grid.cbar_axes[0].colorbar(
+    plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()), alpha=1.0
+)
+cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
+grid[0].yaxis.set_tick_params(rotation=90)
+plt.tight_layout(pad=0.4)
+plt.savefig(out_path / f'panelD_{N_ROTATIONS[rot_idx]}.pdf')
+plt.show()
+# %% PANEL D: v2
+fig = plt.figure(figsize=(6*cm, 5*cm))
+grid = ImageGrid(
+    fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
+    cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
+grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
+grid[0].set_xlabel(r"$1/\rho$")
+grid[0].set_ylabel(r"$\langle\lambda^{-1}\rangle$")
+im = grid[0].scatter(
+    (1/lambda_last)[rot_idx],
+    proj_radius[rot_idx],
+    c=jnp.log(spectral_errors[rot_idx]),
+    marker='.', alpha=.1, s=2)
+cbar = grid.cbar_axes[0].colorbar(
+    plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()), alpha=1.0
+)
+cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
+grid[0].yaxis.set_tick_params(rotation=90)
+plt.tight_layout(pad=0.4)
+# plt.savefig(out_path / 'panelD_v2.pdf')
 plt.show()

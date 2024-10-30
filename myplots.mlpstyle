@@ -26,7 +26,7 @@ axes.spines.left : True
 
 # LINES
 axes.prop_cycle : cycler('color', [ 'F05039', '3D65A5', 'FFC107', '4CAF50']) #hex colours
-lines.linewidth : 1.5
+lines.linewidth : 1.
 
 # TICKS
 xtick.labelsize : 10
