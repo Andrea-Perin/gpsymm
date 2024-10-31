@@ -7,6 +7,7 @@ from jaxlib.xla_client import Layout
 from jaxtyping import Float, Array
 from gp_utils import kreg, extract_components, circulant_error, make_circulant
 import functools as ft
+from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -19,6 +20,8 @@ from plot_utils import cm, get_size
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 bcmap = matplotlib.colors.ListedColormap([colors[0], colors[1]])
 
+out_path = Path('images/toy_model')
+out_path.mkdir(parents=True, exist_ok=True)
 
 # we use the orthogonal normalization in our computations.
 # This means that sometimes we will introduce sqrt(N) factors around.
@@ -66,13 +69,13 @@ our_errors = jnp.array(our_errors).flatten()
 fig, ax = plt.subplots(figsize=(5*cm, 8*cm))
 ax.plot(Ns, jnp.log(errors), 'o-', color='black', label=r'Emp.')
 ax.plot(Ns, jnp.log(our_errors), '.-', color=colors[0], label=r'Ours')
-ax.set_xlabel(r'$N_{{rot}}$')
+ax.set_xlabel(r'$N$')
 ax.set_ylabel(r'$\log(\varepsilon)$', ha='left', rotation=0, y=1, labelpad=0)
 ax.set_xticks([Ns[0], 25, 50])
 ax.set_title(', '.join((f'$L={L}$', f'$\Delta={d}$')))
 ax.legend()
 plt.tight_layout()
-# plt.savefig('images/fig3_panelB.pdf')
+plt.savefig(out_path / 'case2_panelB.pdf')
 plt.show()
 
 
@@ -104,7 +107,7 @@ for axidx, idx in enumerate(idxs_to_plot):
     xdata = datasets[idx]
     ax = fig.add_subplot(gs_top[axidx], projection='3d', computed_zorder=False)
     ax = clean_3d_ax(ax)
-    ax.set_title(f"$N_{{rot}} = {len(xdata)//2}$")
+    ax.set_title(f"$N = {len(xdata)//2}$")
     # data
     ax.scatter(xdata[1::2, 2], xdata[1::2, 1], xdata[1::2, 0], c=colors[1], marker='o', depthshade=False)
     ax.scatter(xdata[2::2, 2], xdata[2::2, 1], xdata[2::2, 0], c=colors[0], marker='o', depthshade=False)
@@ -155,7 +158,7 @@ for axidx, idx in enumerate(idxs_to_plot):
 fig.supylabel(r'$\lambda^{-1}$', x=0.1, y=.3, ha='center')
 fig.supxlabel('Frequency', ha='center', y=0.09)
 plt.tight_layout()
-# plt.savefig('images/fig3_panelsAC.pdf')
+plt.savefig(out_path / 'case2_panelAC.pdf')
 plt.show()
 
 
@@ -238,7 +241,7 @@ for axidx, idx in enumerate(idxs_to_plot):
 fig.supylabel(r'$\lambda^{-1}$', x=0.1, y=.3, ha='center')
 fig.supxlabel('Frequency', ha='center', y=0.09)
 plt.tight_layout()
-# plt.savefig('images/fig3_panelsDF.pdf')
+plt.savefig(out_path / 'case1_panelAC.pdf')
 plt.show()
 
 
@@ -249,8 +252,8 @@ ax.plot(jnp.log(ds), jnp.log(errors), 'o-', color='black', label=r'Emp.')
 ax.plot(jnp.log(ds), jnp.log(our_errors), '.-', color=colors[0], label=r'Ours')
 ax.set_xlabel(r'$\log\Delta$')
 ax.set_ylabel(r'$\log(\varepsilon)$', ha='left', rotation=0, y=1, labelpad=0)
-ax.set_title(', '.join((f'$L={L}$', f'$N_{{rot}}={N}$')))
+ax.set_title(', '.join((f'$L={L}$', f'$N={N}$')))
 ax.legend()
 plt.tight_layout()
-# plt.savefig('images/fig3_panelE.pdf')
+plt.savefig(out_path / 'case1_panelB.pdf')
 plt.show()
