@@ -47,3 +47,15 @@ def add_spines(ax):
     ax.spines['left'].set_visible(True)
     ax.set_xticks([])
     ax.set_yticks([])
+
+
+def clean_3d_ax(ax):
+    ax.xaxis.pane.fill = False
+    ax.yaxis.pane.fill = False
+    ax.zaxis.pane.fill = False
+    # Remove ticks from each axis
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    ax.grid(False)
+    return ax
