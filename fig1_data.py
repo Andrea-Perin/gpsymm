@@ -257,19 +257,6 @@ for lo_digit in range(10):
                 test_acc_in[lo_digit, nidx, midx, epoch] = get_accuracy(model, testloader_in)
                 test_acc_out[lo_digit, nidx, midx, epoch] = get_accuracy(model, testloader_out)
 
-        # save to disk: make columns with all the stuff to save
-        # epochs = ein.repeat(np.arange(n_epochs), 'n -> (m n)', m=len(model_names))
-        # mnames = np.array(model_names*n_epochs)
-        # train_losses_ = ein.rearrange(train_losses[nidx], 'm e -> (m e)')
-        # train_acc_ = ein.rearrange(train_acc[nidx], 'm e -> (m e)')
-        # test_acc_in_ = ein.rearrange(test_acc_in[nidx], 'm e -> (m e)')
-        # test_acc_out_ = ein.rearrange(test_acc_out[nidx], 'm e -> (m e)')
-        # np.savetxt(
-        #     results_dir / f'{lo_digit}_{na}.csv',
-        #     np.c_[epochs, mnames, train_losses_, train_acc_, test_acc_in_, test_acc_out_],
-        #     header='epoch,model,train_loss,train_acc,test_acc_in,test_acc_out',
-        #     fmt='%s', delimiter=',', comments=''
-        # )
 # easier way - cleaner and safer
 results, _ = ein.pack(
     (train_losses, train_acc, test_acc_in, test_acc_out),
