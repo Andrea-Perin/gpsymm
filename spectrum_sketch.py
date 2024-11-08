@@ -8,8 +8,7 @@ import einops as ein
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-# plt.style.use('./myplots.mplstyle')
-
+plt.style.use('myplots.mlpstyle')
 from plot_utils import cm, add_spines, clean_3d_ax
 
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -29,7 +28,7 @@ def get_data(N: int, d: float, r: float=1.,) -> Float[Array, '2N 3']:
 
 
 L = 1.
-N = 8
+N = 6
 D = 1.
 R = 1.
 data = get_data(N=N, d=D, r=R)
@@ -42,7 +41,8 @@ fig = plt.figure(figsize=(6.25*cm, 6*cm))
 ax = fig.add_subplot(111, projection='3d')
 ax = clean_3d_ax(ax)
 ax.scatter(data[1::2, 2], data[1::2, 1], data[1::2, 0], c=colors[1], marker='o', depthshade=False)
-ax.scatter(data[::2, 2], data[::2, 1], data[::2, 0], c=colors[0], marker='o', depthshade=False)
+ax.scatter(data[2::2, 2], data[2::2, 1], data[2::2, 0], c=colors[0], marker='o', depthshade=False)
+ax.scatter(data[0, 2], data[0, 1], data[0, 0], c='black', marker='o', depthshade=False)
 # add fake circle
 theta = jnp.linspace(0, 2 * jnp.pi, 201)
 ax.plot(jnp.ones_like(theta)*D/2, jnp.sin(theta), jnp.cos(theta), linestyle='--', c=colors[0], lw=.5)
@@ -50,6 +50,9 @@ ax.plot(-D/2*jnp.ones_like(theta), jnp.sin(theta), jnp.cos(theta), linestyle='--
 ax.text2D(0.25, 0.05, "x", transform=ax.transAxes)
 ax.text2D(0.85, 0.15, "y", transform=ax.transAxes)
 ax.text2D(0.95, 0.85, "z", transform=ax.transAxes)
+ax.set_xlim((-1, 1))
+ax.set_ylim((-1, 1))
+ax.set_zlim((-1, 1))
 plt.tight_layout()
 plt.savefig(out_path / 'panelA.pdf')
 plt.show()
@@ -61,17 +64,18 @@ fig, ax = plt.subplots(
 )
 
 ax[0].set_axis_off()
-ax[0].imshow(distsq)
+ax[0].imshow(distsq, cmap='viridis')
 ax[0].set_title(r"$d^2(x_i, x_j)$", fontsize=10)
 
 ax[1].set_axis_off()
-ax[1].imshow(kernel)
+ax[1].imshow(kernel, cmap='viridis')
 ax[1].set_title(r"$k_{RBF}(x_i, x_j)$", fontsize=10)
 # highlight one row of the kernel matrix
 row = N
 rect1 = Rectangle( (-.5, row-.5), width=2*N, height=1, linewidth=1, edgecolor=colors[0], facecolor='none')
 ax[1].add_patch(rect1)
-ax[1].text(-1, row, r'$k(x_N, \vec{x}_\mathcal{D})$', horizontalalignment='right', verticalalignment='center', rotation=90)
+# ax[1].text(-1, row, r'$k(x_N, \vec{x}_\mathcal{D})$', horizontalalignment='right', verticalalignment='center', rotation=90)
+plt.tight_layout(pad=0)
 plt.subplots_adjust(wspace=0, hspace=.4)
 plt.savefig(out_path / 'panelB.pdf')
 plt.show()

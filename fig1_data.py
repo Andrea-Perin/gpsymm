@@ -39,24 +39,24 @@ def set_seed_and_generator(seed=0):
     return torch.Generator().manual_seed(seed)
 
 
-generator = set_seed_and_generator(123)
+generator = set_seed_and_generator(125)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.cuda.empty_cache()
 
 results_dir = Path('./results')
 results_dir.mkdir(parents=True, exist_ok=True)
-n_epochs = 1
+n_epochs = 21
 
 # if full experiment is needed
 batch_size = 512
-n_angles = [2, 4]#, 8] #, 16, 32, 64] #, 128]
+n_angles = [2, 4, 8, 16, 32, 64]
 lo_class = 5
 
 
 # %% Weird dataset thing
 transform = Compose([ToImage(), ToDtype(torch.float32, scale=True)])
 class RotatedMNIST(MNIST):
-    def __init__(self, root, n_angles=4, transform=transform, target_transform=None, download=False):
+    def __init__(self, root, n_angles=4, transform=transform, target_transform=None, download=True):
         super(RotatedMNIST, self).__init__(root, train=True, transform=transform,
                                           target_transform=target_transform, download=download)
         self.n_angles = n_angles
@@ -64,6 +64,8 @@ class RotatedMNIST(MNIST):
         self.rotation_angles = [i * (360 / self.n_angles) for i in range(self.n_angles)]
         # create data
         self.data = self.data.to(torch.float32)[None, ...] / 255.
+        norm = torch.sqrt(ein.reduce(self.data**2, '1 n h w -> 1 n 1 1', 'sum'))
+        self.data /= norm
         rot_imgs = [rotate(img, a) for img in self.data for a in self.rotation_angles]
         # create all the data at once
         self.data, ps = ein.pack(rot_imgs, '* w h')
@@ -82,7 +84,7 @@ def get_datasets(n_angles: int, lo_class: int = 5, train_test_fraction: float = 
     # mask away the unrotated samples
     lo_mask = torch.logical_and(
         rotmnist.targets == lo_class,
-        torch.arange(len(rotmnist)) % n_angles == 0
+        torch.arange(len(rotmnist)) // 60_000 == 0
         )
     lo_idxs = torch.argwhere(lo_mask).flatten().tolist()
     train_intest_idxs = torch.argwhere(~lo_mask).flatten()
@@ -132,13 +134,13 @@ def get_cnn():
 def get_mlp():
     return nn.Sequential(
     Rearrange('b 1 h w -> b (h w)'),
-    nn.Linear(1*28*28, 128, bias=True),
+    nn.Linear(1*28*28, 512, bias=True),
     nn.ReLU(),
     nn.Dropout(),
-    nn.Linear(128, 64, bias=True),
+    nn.Linear(512, 128, bias=True),
     nn.ReLU(),
     nn.Dropout(),
-    nn.Linear(64, 10, bias=False),
+    nn.Linear(128, 10, bias=False),
     nn.LogSoftmax(dim=1)
 )
 
@@ -161,7 +163,6 @@ def train(model, optim, loader, loss_fn=loss_fn):
     model.train(True)
     for input, target in iter(loader):
         optim.zero_grad()
-        # breakpoint()
         output = model(input.to(device))
         loss = loss_fn(output, target.to(device))
         loss.backward()
@@ -215,50 +216,63 @@ model_names = [
     'conv',
     'vit'
 ]
-train_losses = torch.zeros((len(n_angles), len(model_names), n_epochs))
-train_acc = torch.zeros((len(n_angles), len(model_names), n_epochs))
-test_acc_in = torch.zeros((len(n_angles), len(model_names), n_epochs))
-test_acc_out = torch.zeros((len(n_angles), len(model_names), n_epochs))
+results_shape = (10, len(n_angles), len(model_names), n_epochs+1)
+train_losses = torch.zeros(results_shape)
+train_acc = torch.zeros(results_shape)
+test_acc_in = torch.zeros(results_shape)
+test_acc_out = torch.zeros(results_shape)
 
 # training loop: recreate the dataset, but with more points
-for nidx, na in enumerate(n_angles):
-    print(f"Dataset has {na} angles")
-    # make datasets and loaders
-    training, intest, outtest = get_datasets(n_angles=na, lo_class=lo_class)
-    trainloader = DataLoader(training, batch_size=batch_size, shuffle=True)
-    testloader_in = DataLoader(intest, batch_size=batch_size, shuffle=True)
-    testloader_out = DataLoader(outtest, batch_size=batch_size)
-    # reinitialize the models
-    model_list = [
-        get_mlp().to(device),
-        get_cnn().to(device),
-        get_vit().to(device)
-    ]
-    optimizer_list = [
-        Adam(model_list[0].parameters(), lr=1e-3, betas=(0.7, 0.9)),
-        Adam(model_list[1].parameters(), lr=1e-3, betas=(0.7, 0.9)),
-        Adam(model_list[2].parameters(), lr=1e-3, betas=(0.7, 0.9)),
-    ]
-    # train each model on the loader
-    for midx, (model, optim) in enumerate(zip(model_list, optimizer_list)):
-        best_test_loss = torch.inf
-        for epoch in tqdm(range(n_epochs), desc=f'Model {midx}', leave=True):
-            train_losses[nidx, midx, epoch] = train(model, optim, trainloader)
-            # log accuracies on train and test
-            train_acc[nidx, midx, epoch] = get_accuracy(model, trainloader)
-            test_acc_in[nidx, midx, epoch] = get_accuracy(model, testloader_in)
-            test_acc_out[nidx, midx, epoch] = get_accuracy(model, testloader_out)
+for lo_digit in range(10):
+    print(f"Currently doing digit {lo_digit}.")
+    for nidx, na in enumerate(n_angles):
+        print(f"Dataset has {na} angles")
+        # make datasets and loaders
+        training, intest, outtest = get_datasets(n_angles=na, lo_class=lo_digit)
+        trainloader = DataLoader(training, batch_size=batch_size, shuffle=True)
+        testloader_in = DataLoader(intest, batch_size=batch_size, shuffle=True)
+        testloader_out = DataLoader(outtest, batch_size=batch_size)
+        # reinitialize the models
+        model_list = [
+            get_mlp().to(device),
+            get_cnn().to(device),
+            get_vit().to(device)
+        ]
+        optimizer_list = [
+            Adam(model_list[0].parameters(), lr=1e-3, betas=(0.7, 0.9)),
+            Adam(model_list[1].parameters(), lr=1e-3, betas=(0.7, 0.9)),
+            Adam(model_list[2].parameters(), lr=1e-3, betas=(0.7, 0.9)),
+        ]
+        # train each model on the loader
+        for midx, (model, optim) in enumerate(zip(model_list, optimizer_list)):
+            best_test_loss = torch.inf
+            train_losses[lo_digit, nidx, midx, 0] = np.inf
+            train_acc[lo_digit, nidx, midx, 0] = get_accuracy(model, trainloader)
+            test_acc_in[lo_digit, nidx, midx, 0] = get_accuracy(model, testloader_in)
+            test_acc_out[lo_digit, nidx, midx, 0] = get_accuracy(model, testloader_out)
+            for epoch in tqdm(range(n_epochs), desc=f'Model {midx}', leave=True):
+                train_losses[lo_digit, nidx, midx, epoch] = train(model, optim, trainloader)
+                # log accuracies on train and test
+                train_acc[lo_digit, nidx, midx, epoch] = get_accuracy(model, trainloader)
+                test_acc_in[lo_digit, nidx, midx, epoch] = get_accuracy(model, testloader_in)
+                test_acc_out[lo_digit, nidx, midx, epoch] = get_accuracy(model, testloader_out)
 
-    # save to disk: make columns with all the stuff to save
-    epochs = ein.repeat(np.arange(n_epochs), 'n -> (m n)', m=len(model_names))
-    mnames = np.array(model_names*n_epochs)
-    train_losses_ = ein.rearrange(train_losses[nidx], 'm e -> (m e)')
-    train_acc_ = ein.rearrange(train_acc[nidx], 'm e -> (m e)')
-    test_acc_in_ = ein.rearrange(test_acc_in[nidx], 'm e -> (m e)')
-    test_acc_out_ = ein.rearrange(test_acc_out[nidx], 'm e -> (m e)')
-    np.savetxt(
-        results_dir / f'results_{na}_angles.csv',
-        np.c_[epochs, mnames, train_losses_, train_acc_, test_acc_in_, test_acc_out_],
-        header='epoch,model,train_loss,train_acc,test_acc_in,test_acc_out',
-        fmt='%s', delimiter=',', comments=''
-    )
+        # save to disk: make columns with all the stuff to save
+        # epochs = ein.repeat(np.arange(n_epochs), 'n -> (m n)', m=len(model_names))
+        # mnames = np.array(model_names*n_epochs)
+        # train_losses_ = ein.rearrange(train_losses[nidx], 'm e -> (m e)')
+        # train_acc_ = ein.rearrange(train_acc[nidx], 'm e -> (m e)')
+        # test_acc_in_ = ein.rearrange(test_acc_in[nidx], 'm e -> (m e)')
+        # test_acc_out_ = ein.rearrange(test_acc_out[nidx], 'm e -> (m e)')
+        # np.savetxt(
+        #     results_dir / f'{lo_digit}_{na}.csv',
+        #     np.c_[epochs, mnames, train_losses_, train_acc_, test_acc_in_, test_acc_out_],
+        #     header='epoch,model,train_loss,train_acc,test_acc_in,test_acc_out',
+        #     fmt='%s', delimiter=',', comments=''
+        # )
+# easier way - cleaner and safer
+results, _ = ein.pack(
+    (train_losses, train_acc, test_acc_in, test_acc_out),
+    'd m e *'
+)
+np.save( results_dir / 'eeeeee', results )

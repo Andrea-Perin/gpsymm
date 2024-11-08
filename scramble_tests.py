@@ -124,3 +124,44 @@ plt.figure()
 plt.imshow( kernels[0])
 plt.colorbar()
 plt.show()
+
+# %% In the same spirit, here are some tests for permutations of the kernels
+import functools as ft
+
+def permute_matrix_even_odd(matrix):
+    n, m = matrix.shape
+    if n != m:
+        raise ValueError("The input matrix must be square.")
+    even_indices = jnp.arange(0, n, 2)
+    odd_indices = jnp.arange(1, n, 2)
+    permuted_indices = jnp.concatenate([even_indices, odd_indices])
+    permuted_matrix = matrix[permuted_indices][:, permuted_indices]
+    return permuted_matrix
+
+def interleave(arr):
+    before = jnp.arange(len(arr))
+    after = ein.pack((before[::2], before[1::2]), '*')[0]
+    arr = arr.at[before].set(arr[after])
+    return arr.at[:, before].set(arr[:, after])
+
+
+def check_circulant(arr):
+    start = jnp.ones(len(arr), dtype=bool)
+    aligned = jax.vmap(jnp.roll)(arr, -jnp.arange(len(arr)))
+    return jnp.all(
+        jax.vmap(jnp.isclose, in_axes=(1, 0))(aligned, aligned[0])
+    )
+
+print(check_circulant(kernel))
+print(check_circulant(jnp.eye(10)))
+print(jax.vmap(jnp.roll)(kernel, -jnp.arange(len(kernel))))
+plt.imshow(jax.vmap(jnp.roll)(kernel, -jnp.arange(len(kernel))))
+plt.show()
+
+
+plt.imshow(kernel)
+plt.show()
+plt.imshow(interleave(kernel))
+plt.show()
+plt.imshow(permute_matrix_even_odd(kernel))
+plt.show()
