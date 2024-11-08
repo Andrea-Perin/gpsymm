@@ -152,16 +152,16 @@ def check_circulant(arr):
         jax.vmap(jnp.isclose, in_axes=(1, 0))(aligned, aligned[0])
     )
 
-print(check_circulant(kernel))
+print(check_circulant(kernels[0]))
 print(check_circulant(jnp.eye(10)))
-print(jax.vmap(jnp.roll)(kernel, -jnp.arange(len(kernel))))
-plt.imshow(jax.vmap(jnp.roll)(kernel, -jnp.arange(len(kernel))))
+print(jax.vmap(jnp.roll)(kernels[0], -jnp.arange(len(kernels[0]))))
+plt.imshow(jax.vmap(jnp.roll)(kernels[0], -jnp.arange(len(kernels[0]))))
 plt.show()
 
 
-plt.imshow(kernel)
+plt.imshow(kernels[0])
 plt.show()
-plt.imshow(interleave(kernel))
+plt.imshow(interleave(kernels[0]))
 plt.show()
-plt.imshow(permute_matrix_even_odd(kernel))
+plt.imshow(permute_matrix_even_odd(kernels[0]))
 plt.show()
