@@ -32,7 +32,7 @@ N_ROTATIONS = [4, 8, 16, 32, 64]
 N_PAIRS = 5_000
 REG = 1e-5
 N_PCS = 3
-out_path = Path('images/fig4')
+out_path = Path('images/highd')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -107,7 +107,7 @@ ax.set_yticks([])
 ax.set_zticks([])
 fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 plt.tight_layout(pad=0)
-plt.savefig(out_path / 'panelA_8angles.pdf', bbox_inches='tight') #, pad_inches=0)
+# plt.savefig(out_path / 'panelA_8angles.pdf', bbox_inches='tight') #, pad_inches=0)
 plt.show()
 
 
@@ -373,7 +373,7 @@ cbar.set_label('Error magnitude')
 # plt.subplots_adjust(left=0.15, right=0.85, bottom=0.2, top=0.85)
 plt.subplots_adjust(top=1, bottom=0, wspace=0, hspace=0)
 plt.tight_layout(pad=0)
-plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0)
+# plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0)
 plt.show()
 
 # %% PANEL B: v2
@@ -434,7 +434,7 @@ cbar = grid.cbar_axes[0].colorbar(
 cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
-plt.savefig(out_path / f'panelC_{N_ROTATIONS[rot_idx]}.pdf')
+# plt.savefig(out_path / f'panelC_{N_ROTATIONS[rot_idx]}.pdf')
 plt.show()
 
 # %% PANEL D: v2
@@ -448,8 +448,8 @@ grid[0].set_xlabel(r"$\langle\lambda^{-1}\rangle$")
 im = grid[0].scatter(
     # jnp.sqrt(lambda_avg[rot_idx]),
     lambda_avg[rot_idx],
-    1/proj_radius[rot_idx],
-    # avg_angle[rot_idx],
+    # 1/proj_radius[rot_idx],
+    avg_angle[rot_idx],
     c=jnp.log(spectral_errors[rot_idx]),
     marker='.', alpha=.1, s=2)
 cbar = grid.cbar_axes[0].colorbar(
@@ -458,7 +458,7 @@ cbar = grid.cbar_axes[0].colorbar(
 cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
-plt.savefig(out_path / f'panelD_{N_ROTATIONS[rot_idx]}.pdf')
+# plt.savefig(out_path / f'panelD_{N_ROTATIONS[rot_idx]}.pdf')
 plt.show()
 # %% PANEL D: v2
 fig = plt.figure(figsize=(6*cm, 5*cm))
