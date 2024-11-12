@@ -174,3 +174,4 @@ MNIST/
 *.pdf
 *.png
 *.csv
+pyproject.toml
