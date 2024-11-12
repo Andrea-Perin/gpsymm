@@ -31,7 +31,7 @@ Ensemble = List[Tuple[Array, Array] | Tuple[()]]
 SEED = 124
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 100
+N_PAIRS = 1000
 
 N_IMGS = 60_000
 IN_SHAPE = 784
@@ -125,7 +125,6 @@ def get_data(
     n_pairs: int = N_PAIRS,
     collision_rate: float = .2,
 ) -> Float[Array, 'pair (angle digit) (width height)']:
-    breakpoint()
     n_pairs_actual = int(n_pairs * (1+collision_rate))
     key_a, key_b = jr.split(key)
     angles = jnp.linspace(0, 2*jnp.pi, n_rotations, endpoint=False)
@@ -161,3 +160,4 @@ for angle_idx, n_angles in enumerate(tqdm(N_ROTATIONS)):
 
 
 np.save(out_path / 'predictions', preds)
+# %%
