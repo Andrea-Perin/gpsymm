@@ -67,13 +67,13 @@ schedule = optax.schedules.warmup_exponential_decay_schedule(
     transition_steps=100,
     decay_rate=.5
 )
-optim = optax.adafactor()
+optim = optax.adafactor(learning_rate=schedule)
 
 
 # %%
 def loss(params: Ensemble, x: Float[Array, 'pair 2*angles 28*28'], y: Float[Array, 'pair 2*angles']) -> Scalar:
-    yhat = jax.vmap(apply_fn)(params, x).squeeze()
-    mses = ein.reduce((y-yhat)**2, 'pair angle -> pair', 'mean')
+    yhat = jax.vmap(apply_fn)(params, x)
+    mses = ein.reduce((y[..., None]-yhat)**2, 'pair angle d -> pair', 'mean')
     return jnp.sum(mses)
 
 
