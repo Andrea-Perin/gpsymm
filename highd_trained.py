@@ -25,14 +25,14 @@ Ensemble = List[Tuple[Array, Array] | Tuple[()]]
 SEED = 124
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 500
+N_PAIRS = 250
 N_IMGS = 60_000
 IN_SHAPE = 784
 HIDDEN_DIM = 512
 N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
 W_std = 1/jnp.sqrt(IN_SHAPE)
 b_std = 1/jnp.sqrt(IN_SHAPE)
-N_EPOCHS = 5_000
+N_EPOCHS = 10_000
 REG = 1e-5
 out_path = Path('results/highd_trained_adafactor')
 out_path.mkdir(parents=True, exist_ok=True)
@@ -67,7 +67,7 @@ schedule = optax.schedules.warmup_exponential_decay_schedule(
     transition_steps=100,
     decay_rate=.5
 )
-optim = optax.adafactor(learning_rate=schedule)
+optim = optax.adamw(learning_rate=schedule)
 
 
 # %%
@@ -95,7 +95,7 @@ def train(
         y: Int[Array, " 2*angles"],
     ):
         loss_value, grads = jax.value_and_grad(loss)(params, x, y)
-        updates, opt_state = optim.update(grads, opt_state, params )
+        updates, opt_state = optim.update(grads, opt_state, params)
         params = eqx.apply_updates(params, updates)
         return params, opt_state, loss_value
 
