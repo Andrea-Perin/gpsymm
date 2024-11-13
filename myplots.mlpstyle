@@ -37,4 +37,4 @@ ytick.color : (0.2,0.2,0.2)
 ytick.direction : out
 
 # IMAGE
-image.cmap: cividis
+image.cmap: viridis
