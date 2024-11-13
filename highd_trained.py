@@ -1,4 +1,8 @@
 # %% High-d case, but this time with trained networks instead of NTK
+# import pdb
+# pdb.set_trace()
+
+
 import numpy as np
 import jax
 from jax import numpy as jnp, random as jr
@@ -25,7 +29,9 @@ N_PAIRS = 500
 N_IMGS = 60_000
 IN_SHAPE = 784
 HIDDEN_DIM = 512
-W_std, b_std = 1/jnp.sqrt(HIDDEN_DIM), 1/jnp.sqrt(HIDDEN_DIM)
+N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
+W_std = 1/jnp.sqrt(IN_SHAPE)
+b_std = 1/jnp.sqrt(IN_SHAPE)
 N_EPOCHS = 5_000
 REG = 1e-5
 out_path = Path('results/highd_trained_adafactor')
@@ -101,29 +107,25 @@ def train(
     return params, losses
 
 
-@jax.jit
-def get_spectral_error(data) -> Float[Array, 'N_PAIRS']:
-    kernels = jax.vmap(kernel_fn)(data, data).ntk
-    ckernels = jax.vmap(make_circulant)(kernels)
-    return jax.vmap(circulant_error)(ckernels)
-
-
 # select pairs from original mnist
 def get_data(
     key: PRNGKeyArray,
     n_rotations: int,
     n_pairs: int = N_PAIRS,
-    collision_rate: float = .2,
+    collision_rate: float = 1.,
 ) -> Float[Array, 'pair (angle digit) (width height)']:
+    """BEWARE: This thing draws on and on until it gets n_pairs that are good"""
     n_pairs_actual = int(n_pairs * (1+collision_rate))
-    key_a, key_b = jr.split(key)
     angles = jnp.linspace(0, 2*jnp.pi, n_rotations, endpoint=False)
-    idxs_A, idxs_B = jr.randint(key, minval=0, maxval=N_IMGS, shape=(2, n_pairs_actual,))
-    # remove same-digit pairs
-    labels_A, labels_B = labels[idxs_A], labels[idxs_B]
-    collision_mask = (labels_A == labels_B)
-    idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
-    #
+    num_produced = 0
+    while num_produced < n_pairs:
+        key, key_ab = jr.split(key)
+        idxs_A, idxs_B = jr.randint(key_ab, minval=0, maxval=N_IMGS, shape=(2, n_pairs_actual,))
+        # remove same-digit pairs
+        labels_A, labels_B = labels[idxs_A], labels[idxs_B]
+        collision_mask = (labels_A == labels_B)
+        idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
+        num_produced = len(idxs_A)
     images_A, images_B = images[idxs_A], images[idxs_B]
     orbits_A = make_orbit(images_A, angles)
     orbits_B = make_orbit(images_B, angles + jnp.pi/n_rotations)
@@ -131,15 +133,35 @@ def get_data(
     return ein.rearrange(data, 'pair digit angle width height -> pair (angle digit) (width height)')
 
 
-sp_errors = np.empty( (len(N_ROTATIONS), N_PAIRS))
+@jax.jit
+def get_theory_values(data: Float[Array, 'pair (angle digit) (width height)']) -> Float[Array, 'pair N_THEORY_VALS']:
+    # compute the spectral error, lambda_N, lambda_avg, deltasq, and the angle
+    kernels = jax.vmap(kernel_fn)(data, data).ntk
+    ckernels = jax.vmap(make_circulant)(kernels)
+    isp = 1 / (jnp.abs(jnp.fft.fft(ckernels[:, 0])) + REG)
+    lam_n = isp[:, isp.shape[1]//2]
+    lam_avg = ein.reduce(isp, 'pair spectrum -> pair', 'mean')
+    sp_err = lam_n/lam_avg
+    # deltasq
+    rearranged = ein.rearrange(data, 'pair (angle digit) wh -> digit pair angle wh', digit=2)
+    projs = ein.reduce(rearranged, 'digit pair angle wh -> digit pair wh', 'mean')
+    deltasq = ein.einsum((projs[0] - projs[1])**2, 'pair wh -> pair')
+    # avg angle
+    avg_angle = ckernels[:, 0, 2]
+    return ein.pack(
+        (sp_err, lam_n, lam_avg, deltasq, avg_angle),
+        'pair *')[0]
+
+
+theory_values = np.empty( (len(N_ROTATIONS), N_PAIRS, N_THEORY_VALS) )
 preds = np.empty( (len(N_ROTATIONS), N_PAIRS, 2) )
 losses = np.empty( (len(N_ROTATIONS), N_EPOCHS, 2) )
 for angle_idx, n_angles in enumerate(tqdm(N_ROTATIONS)):
     data = get_data(key=RNG, n_rotations=n_angles, n_pairs=N_PAIRS)
     targets = jnp.array(([+1., -1.]*n_angles))
     targets = ein.repeat(targets, 'angle -> pair angle', pair=N_PAIRS)
-    # compute the spectral error
-    sp_errors[angle_idx] = get_spectral_error(data)
+    # compute the spectral error, lambda_N, lambda_avg, deltasq, and the angle
+    theory_values[angle_idx] = get_theory_values(data)
     # train on positive
     RNG, params_p = init_params(RNG)
     params_p, losses_p = train(params=params_p, x=data[:, 1:], y=targets[:, 1:], optim=optim, epochs=N_EPOCHS)
@@ -157,6 +179,6 @@ for angle_idx, n_angles in enumerate(tqdm(N_ROTATIONS)):
 
 
 # save data
-np.save(out_path / 'sp_errors', sp_errors)
+np.save(out_path / 'theory_values', theory_values)
 np.save(out_path / 'predictions', preds)
 np.save(out_path / 'losses', losses)
