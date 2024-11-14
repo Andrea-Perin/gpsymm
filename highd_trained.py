@@ -2,7 +2,6 @@
 # import pdb
 # pdb.set_trace()
 
-
 import numpy as np
 import jax
 from jax import numpy as jnp, random as jr
@@ -30,11 +29,11 @@ N_IMGS = 60_000
 IN_SHAPE = 784
 HIDDEN_DIM = 512
 N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
-W_std = 1/jnp.sqrt(IN_SHAPE)
-b_std = 1/jnp.sqrt(IN_SHAPE)
-N_EPOCHS = 10_000
+W_std = 1.
+b_std = 1.
+N_EPOCHS = 15_000
 REG = 1e-5
-out_path = Path('results/highd_trained_adafactor')
+out_path = Path('results/highd_trained_weirdinit')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -51,11 +50,35 @@ init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
+kernel_fn = jax.jit(kernel_fn)
 
-def init_params(key):
+
+def kaiming_uniform(in_, shape, key):
+    amax = 1/jnp.sqrt(in_)
+    return jr.uniform(key, shape=shape, minval=-amax, maxval=amax)
+
+
+def init_params(key, uniform: bool = False):
     key, ens_key = jr.split(key)
     ens_key = jr.split(ens_key, N_PAIRS)
     out_shape, params = jax.vmap(init_fn, in_axes=(0, None))(ens_key, in_shape)
+    if uniform:
+        # if here, initialize like PyTorch does. SUPER HACKY
+        nlayers = len(params)
+        new_params = []
+        for l in range(nlayers):
+            key, lk = jr.split(key)
+            wk, bk = jr.split(lk)
+            if params[l] == ():  # activation layer
+                new_params.append( () )
+            else:  # linear layer
+                new_params.append(
+                    (
+                        kaiming_uniform(params[l][0].shape[1], params[l][0].shape, wk),
+                        kaiming_uniform(params[l][1].shape[-1], params[l][1].shape, bk)
+                    )
+                )
+        params = new_params
     return key, params
 
 
@@ -67,7 +90,7 @@ schedule = optax.schedules.warmup_exponential_decay_schedule(
     transition_steps=100,
     decay_rate=.5
 )
-optim = optax.adamw(learning_rate=schedule)
+optim = optax.novograd(learning_rate=schedule)
 
 
 # %%
@@ -138,10 +161,10 @@ def get_theory_values(data: Float[Array, 'pair (angle digit) (width height)']) -
     # compute the spectral error, lambda_N, lambda_avg, deltasq, and the angle
     kernels = jax.vmap(kernel_fn)(data, data).ntk
     ckernels = jax.vmap(make_circulant)(kernels)
-    isp = 1 / (jnp.abs(jnp.fft.fft(ckernels[:, 0])) + REG)
+    isp = 1/jnp.abs(jax.vmap(orthofft)(ckernels[:, 0]) + REG*jnp.sqrt(ckernels.shape[-1]))
     lam_n = isp[:, isp.shape[1]//2]
     lam_avg = ein.reduce(isp, 'pair spectrum -> pair', 'mean')
-    sp_err = lam_n/lam_avg
+    sp_err = jax.vmap(circulant_error)(ckernels)
     # deltasq
     rearranged = ein.rearrange(data, 'pair (angle digit) wh -> digit pair angle wh', digit=2)
     projs = ein.reduce(rearranged, 'digit pair angle wh -> digit pair wh', 'mean')
@@ -163,14 +186,14 @@ for angle_idx, n_angles in enumerate(tqdm(N_ROTATIONS)):
     # compute the spectral error, lambda_N, lambda_avg, deltasq, and the angle
     theory_values[angle_idx] = get_theory_values(data)
     # train on positive
-    RNG, params_p = init_params(RNG)
+    RNG, params_p = init_params(RNG, uniform=True)
     params_p, losses_p = train(params=params_p, x=data[:, 1:], y=targets[:, 1:], optim=optim, epochs=N_EPOCHS)
     preds_p = jax.vmap(apply_fn)(params_p, data[:, 0])
     preds[angle_idx, :, :1] = preds_p
     losses[angle_idx, :, 0] = losses_p
     del params_p
     # train on negative
-    RNG, params_m = init_params(RNG)
+    RNG, params_m = init_params(RNG, uniform=True)
     params_m, losses_m = train(params=params_m, x=data[:, :-1], y=targets[:, :-1], optim=optim, epochs=N_EPOCHS)
     preds_m = jax.vmap(apply_fn)(params_m, data[:, -1])
     preds[angle_idx, :, 1:] = preds_m
@@ -182,3 +205,4 @@ for angle_idx, n_angles in enumerate(tqdm(N_ROTATIONS)):
 np.save(out_path / 'theory_values', theory_values)
 np.save(out_path / 'predictions', preds)
 np.save(out_path / 'losses', losses)
+print(f"Saved results in {out_path}")
