@@ -23,8 +23,9 @@ def extract_components(
         - k_cross: The i-th column with i-th element removed (n-1, 1)
         - k_ii: The (i,i) element of the original matrix (1, 1)
     """
-    k_reduced = jnp.delete(jnp.delete(k, i, axis=0), i, axis=1)
-    k_cross = jnp.delete(k[:, [i]], i, axis=0)
+    k_reduced = jnp.hstack((k[:, :i], k[:, i+1:]))
+    k_reduced = jnp.vstack((k_reduced[:i], k_reduced[i+1:]))
+    k_cross = jnp.vstack((k[:i, [i]], k[i+1:, [i]]))
     return k_reduced, k_cross, k[[i], [i]]
 
 

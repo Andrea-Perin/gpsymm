@@ -1,3 +1,4 @@
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
 from matplotlib.offsetbox import AnchoredText
@@ -5,6 +6,9 @@ from matplotlib.patheffects import withStroke
 
 # Define some constants to be shared by the plots
 cm = 1/2.54
+
+
+semaphore = mpl.colors.ListedColormap(['red', 'yellow', 'green'])
 
 
 def get_size(margin: float = 2*cm, aspect: float = 1.618):
