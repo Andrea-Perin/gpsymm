@@ -27,13 +27,13 @@ plt.style.use('myplots.mlpstyle')
 # %% Parameters
 SEED = 12
 RNG = jr.PRNGKey(SEED)
-NUM_ANGLES = 8
-NUM_SEEDS = 16
+NUM_ANGLES = 16
+NUM_SEEDS = 10
 N_TESTS = 300
 REG = 1e-4
 N_IMGS = 60_000
-N_CLASSES = 10
-CLASSES_PER_TEST = 3
+N_CLASSES = 10  # how many classes in MNIST
+CLASSES_PER_TEST = 10  # how many classes to use per test
 out_path = Path('images/highd')
 out_path.mkdir(parents=True, exist_ok=True)
 
@@ -105,15 +105,19 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     # sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
     # sp_err = jax.vmap(jax.vmap(jax.vmap(circulant_error, in_axes=(0,)), in_axes=(1,)), in_axes=(2,))(ks)
     # sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
-    sp_err = ein.rearrange(ks, 'r o sa sb i j -> (r o sa sb) i j')
-    sp_err = jax.vmap(make_circulant)(sp_err)
-    sp_err = jax.vmap(circulant_error)(sp_err)
-    sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
-        r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
-    )
-    sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'mean')
-    sp_err = ein.reduce(sp_err, 'r o sa -> r sa', 'max')
-    sp_err = ein.reduce(sp_err, 'r sa -> r', 'mean')
+
+    flat_k = ein.reduce(ks, 'r o sa sb i j -> (r o) i j', 'mean')
+    flat_kc = jax.vmap(make_circulant)(flat_k)
+    sp_err = jax.vmap(circulant_error)(flat_kc)
+    # sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
+    #     r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
+    # )
+    sp_err = ein.rearrange(sp_err, '(r o) -> r o', r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1)
+    # sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'mean')
+    sp_err = ein.reduce(sp_err, 'r o -> r', 'max')
+    # sp_err = ein.reduce(sp_err, 'r o -> r', 'mean')
+
+
     # solve regression
     one_vs_rest_err = []
     for cls in range(CLASSES_PER_TEST):
@@ -140,21 +144,18 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
 
 
 # %%
-fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(10, 4), sharex=True, sharey=True)
-axs[0].scatter(results[:, 0], results[:, 3], alpha=.1)
-axs[0].plot([0, 1.5], [0, 1.5], ls='--', color='k')
-axs[1].scatter(results[:, 1], results[:, 4], alpha=.1)
-axs[1].plot([0, 1.5], [0, 1.5], ls='--', color='k')
-axs[2].scatter(results[:, 2], results[:, 5], alpha=.1)
-axs[2].plot([0, 1.5], [0, 1.5], ls='--', color='k')
-axs[0].set_xlabel('spectral')
-axs[1].set_xlabel('spectral')
-axs[2].set_xlabel('spectral')
-axs[0].set_ylabel('empirical')
+fig, axs = plt.subplots(nrows=1, ncols=CLASSES_PER_TEST, figsize=(20, 4), sharex=True, sharey=True)
+fig.supxlabel('spectral')
+fig.supylabel('empirical')
+for idx, ax in enumerate(axs.flatten()):
+    ax.scatter(results[:, idx], results[:, CLASSES_PER_TEST+idx], alpha=.1)
+    ax.plot([0, 1.5], [0, 1.5], ls='--', color='k')
+plt.savefig('multiclass_plot_1.png')
 plt.show()
 
 # %%
 fig, ax = plt.subplots(figsize=(3, 3))
-ax.scatter(results[:, :3].mean(1), results[:, 3:].mean(1), alpha=.1)
+ax.scatter(results[:, :CLASSES_PER_TEST].mean(1), results[:, CLASSES_PER_TEST:].mean(1), alpha=.1)
 ax.plot([0, 1.5], [0, 1.5], ls='--', color='k')
+plt.savefig('multiclass_plot_2.png')
 plt.show()
