@@ -99,10 +99,21 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     ks = jnp.array(
         [k_one_vs_many(orbits, c) for c in range(CLASSES_PER_TEST)]
     )
-    candidate_ks = ein.reduce(ks, 'refcls othercls seeda seedb i j -> refcls othercls i j', 'mean')
-    ksc = jax.vmap(jax.vmap(make_circulant), in_axes=(1,))(candidate_ks)
-    sp_err = jax.vmap(jax.vmap(circulant_error), in_axes=(1,))(ksc)
-    sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
+    # candidate_ks = ein.reduce(ks, 'refcls othercls seeda seedb i j -> refcls othercls i j', 'mean')
+    # ksc = jax.vmap(jax.vmap(make_circulant), in_axes=(1,))(candidate_ks)
+    # sp_err = jax.vmap(jax.vmap(circulant_error), in_axes=(1,))(ksc)
+    # sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
+    # sp_err = jax.vmap(jax.vmap(jax.vmap(circulant_error, in_axes=(0,)), in_axes=(1,)), in_axes=(2,))(ks)
+    # sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
+    sp_err = ein.rearrange(ks, 'r o sa sb i j -> (r o sa sb) i j')
+    sp_err = jax.vmap(make_circulant)(sp_err)
+    sp_err = jax.vmap(circulant_error)(sp_err)
+    sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
+        r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
+    )
+    sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'mean')
+    sp_err = ein.reduce(sp_err, 'r o sa -> r sa', 'max')
+    sp_err = ein.reduce(sp_err, 'r sa -> r', 'mean')
     # solve regression
     one_vs_rest_err = []
     for cls in range(CLASSES_PER_TEST):
