@@ -1,0 +1,149 @@
+# %% Multiclass stuff
+import numpy as np
+from scipy.interpolate import griddata
+import jax
+from jax import numpy as jnp, random as jr
+from jaxtyping import Array, Float, Integer, Scalar, PyTree, Int, PRNGKeyArray, UInt8
+from typing import Tuple
+import einops as ein
+import neural_tangents as nt
+from tqdm import tqdm
+import functools as ft
+from pathlib import Path
+
+from mnist_utils import load_images, load_labels, normalize_mnist
+from data_utils import three_shear_rotate, xshift_img, kronmap
+from gp_utils import kreg, circulant_error, make_circulant, extract_components
+from plot_utils import cm, cloudplot, add_spines
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, InsetPosition
+from mpl_toolkits.axes_grid1 import ImageGrid
+from matplotlib.patheffects import withStroke
+plt.style.use('myplots.mlpstyle')
+
+
+# %% Parameters
+SEED = 12
+RNG = jr.PRNGKey(SEED)
+NUM_ANGLES = 8
+NUM_SEEDS = 16
+N_TESTS = 300
+REG = 1e-4
+N_IMGS = 60_000
+N_CLASSES = 10
+CLASSES_PER_TEST = 3
+out_path = Path('images/highd')
+out_path.mkdir(parents=True, exist_ok=True)
+
+
+img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
+lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
+images = normalize_mnist(load_images(img_path=img_path))
+labels = load_labels(lab_path=lab_path)
+make_orbit = kronmap(three_shear_rotate, 2)
+orthofft = ft.partial(jnp.fft.fft, norm='ortho')
+find_min_idx = ft.partial(jnp.argmin, axis=1)
+# network and NTK
+W_std, b_std = 1., 1.
+init_fn, apply_fn, kernel_fn = nt.stax.serial(
+    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    nt.stax.Relu(),
+    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    nt.stax.Relu(),
+    nt.stax.Dense(1, W_std=W_std, b_std=b_std)
+)
+kernel_fn = jax.jit(kernel_fn)
+
+
+mycat = lambda x, y: jnp.concatenate((x, y), axis=0)
+def concat_interleave(oa, ob):
+    return ein.rearrange(
+        jnp.concatenate((oa, ob), axis=0),
+        '(digit angle) wh -> (angle digit) wh', digit=2
+    )
+
+
+def peelmap(fn, num):
+    for n in range(num):
+        fn = jax.vmap(fn, in_axes=(n,))
+    return fn
+
+
+def k_one_vs_many(orbits, idx):
+    orbit_a = orbits[idx]
+    orbit_b, ps = ein.pack((orbits[:idx], orbits[idx+1:]), '* seed angle wh')
+    orbit_pairs = jax.vmap(kronmap(concat_interleave, 2), in_axes=(None, 0))(orbit_a, orbit_b)
+    out = peelmap(kernel_fn, 3)(orbit_pairs).ntk
+    return ein.rearrange(out, 'seedb seeda cls i j -> cls seeda seedb i j')
+
+
+angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
+all_orbits = make_orbit(images, angles)
+results = np.empty( (N_TESTS, 2*CLASSES_PER_TEST) )
+RNG, test_key = jr.split(RNG)
+test_keys = jr.split(test_key, N_TESTS)
+
+for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
+    # pick data
+    key, kab = jr.split(key)
+    classes = jr.choice(kab, N_CLASSES, replace=False, shape=(CLASSES_PER_TEST, ))
+    key, k_classes = jr.split(key)
+    k_classes = jr.split(key, CLASSES_PER_TEST)
+    idxs = [jr.choice(k, jnp.argwhere(labels == c), replace=False, shape=(NUM_SEEDS,)) for k, c in zip(k_classes, classes)]
+    idxs = jnp.array(idxs).squeeze()
+    orbits = all_orbits[idxs]
+    orbits = ein.rearrange( orbits, 'cls seed angle w h -> cls seed angle (w h)' )
+    # select one of the three classes; use that as reference, and all the others as "rest of the world"
+    ks = jnp.array(
+        [k_one_vs_many(orbits, c) for c in range(CLASSES_PER_TEST)]
+    )
+    candidate_ks = ein.reduce(ks, 'refcls othercls seeda seedb i j -> refcls othercls i j', 'mean')
+    ksc = jax.vmap(jax.vmap(make_circulant), in_axes=(1,))(candidate_ks)
+    sp_err = jax.vmap(jax.vmap(circulant_error), in_axes=(1,))(ksc)
+    sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
+    # solve regression
+    one_vs_rest_err = []
+    for cls in range(CLASSES_PER_TEST):
+        all_points = ein.rearrange(
+            jnp.roll(orbits, -cls, axis=0),
+            'cls seed angle wh -> (cls seed angle) wh'
+        )
+        whole_kernel = kernel_fn(all_points, all_points).ntk
+        # LINEAR REGRESSION (on unrotated samples from class A)
+        # we are removing the first angle from JUST class A
+        idxs = jnp.arange(0, NUM_SEEDS*NUM_ANGLES, NUM_ANGLES)
+        k11 = jnp.delete( jnp.delete(whole_kernel, idxs, axis=0), idxs, axis=1 )
+        k12 = jnp.delete( whole_kernel[:, idxs], idxs, axis=0, )
+        k22 = whole_kernel[idxs][:, idxs]
+        ys = jnp.array([+1.] * (NUM_SEEDS) * (NUM_ANGLES-1) + [-1.] * NUM_SEEDS * NUM_ANGLES * (CLASSES_PER_TEST - 1))[:, None]
+        sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
+        mean = ein.einsum(sol, ys, 'train test, train d -> test d')
+        var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
+        err_of_avg = jnp.mean(jnp.abs(1 - mean))
+        one_vs_rest_err.append(err_of_avg)
+
+    # log results
+    results[iteration] = (*sp_err.tolist(), *one_vs_rest_err)
+
+
+# %%
+fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(10, 4), sharex=True, sharey=True)
+axs[0].scatter(results[:, 0], results[:, 3], alpha=.1)
+axs[0].plot([0, 1.5], [0, 1.5], ls='--', color='k')
+axs[1].scatter(results[:, 1], results[:, 4], alpha=.1)
+axs[1].plot([0, 1.5], [0, 1.5], ls='--', color='k')
+axs[2].scatter(results[:, 2], results[:, 5], alpha=.1)
+axs[2].plot([0, 1.5], [0, 1.5], ls='--', color='k')
+axs[0].set_xlabel('spectral')
+axs[1].set_xlabel('spectral')
+axs[2].set_xlabel('spectral')
+axs[0].set_ylabel('empirical')
+plt.show()
+
+# %%
+fig, ax = plt.subplots(figsize=(3, 3))
+ax.scatter(results[:, :3].mean(1), results[:, 3:].mean(1), alpha=.1)
+ax.plot([0, 1.5], [0, 1.5], ls='--', color='k')
+plt.show()

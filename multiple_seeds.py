@@ -1,5 +1,4 @@
 # %% multiple seeds
-from neural_tangents._src.utils.typing import Kernel
 import numpy as np
 from scipy.interpolate import griddata
 import jax
@@ -66,21 +65,33 @@ def concat_interleave(oa, ob):
     )
 
 
+def regress(points):
+    whole_kernel = kernel_fn(points, points).ntk
+    idxs = jnp.arange(0, NUM_SEEDS*NUM_ANGLES, NUM_ANGLES)
+    k11 = jnp.delete( jnp.delete(whole_kernel, idxs, axis=0), idxs, axis=1 )
+    k12 = jnp.delete( whole_kernel[:, idxs], idxs, axis=0, )
+    k22 = whole_kernel[idxs][:, idxs]
+    ys = jnp.array([+1.] * (NUM_SEEDS) * (NUM_ANGLES-1) + [-1.] * NUM_SEEDS * NUM_ANGLES)[:, None]
+    sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
+    mean = ein.einsum(sol, ys, 'train test, train d-> test d')
+    var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
+    return jnp.mean(jnp.abs(1 -mean))
+
 
 angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
 all_orbits = make_orbit(images, angles)
 
-results = np.empty( (N_TESTS, 2) )
+results = np.empty( (N_TESTS, 3) )
 colors = []
 RNG, test_key = jr.split(RNG)
 test_keys = jr.split(test_key, N_TESTS)
 for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     # pick data
     key, kab, ka, kb = jr.split(key, num=4)
-    class_a, class_b = jnp.sort(jr.choice(kab, N_CLASSES, shape=(2,)))
+    class_a, class_b = jnp.sort(jr.choice(kab, N_CLASSES, replace=False, shape=(2,)))
     colors.append( (class_a, class_b) )
-    idxs_a = jr.choice(ka, jnp.argwhere(labels == class_a), shape=(NUM_SEEDS,)).squeeze()
-    idxs_b = jr.choice(kb, jnp.argwhere(labels == class_b), shape=(NUM_SEEDS,)).squeeze()
+    idxs_a = jr.choice(ka, jnp.argwhere(labels == class_a), replace=False, shape=(NUM_SEEDS,)).squeeze()
+    idxs_b = jr.choice(kb, jnp.argwhere(labels == class_b), replace=False, shape=(NUM_SEEDS,)).squeeze()
     orbits_a = ein.rearrange(all_orbits[idxs_a], 'seed angle w h -> seed angle (w h)')
     orbits_b = ein.rearrange(all_orbits[idxs_b], 'seed angle w h -> seed angle (w h)')
 
@@ -93,24 +104,30 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
 
     # Then with "normal"
     all_points, ps = ein.pack( (orbits_a, orbits_b), '* wh' )
-    whole_kernel = kernel_fn(all_points, all_points).ntk
-    # LINEAR REGRESSION (on unrotated samples from class A)
-    # we are removing the first angle from JUST class A
-    idxs = jnp.arange(0, NUM_SEEDS*NUM_ANGLES, NUM_ANGLES)
-    k11 = jnp.delete( jnp.delete(whole_kernel, idxs, axis=0), idxs, axis=1 )
-    k12 = jnp.delete( whole_kernel[:, idxs], idxs, axis=0, )
-    k22 = whole_kernel[idxs][:, idxs]
-    ys = jnp.array([+1.] * (NUM_SEEDS) * (NUM_ANGLES-1) + [-1.] * NUM_SEEDS * NUM_ANGLES)[:, None]
-    sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
-    mean = ein.einsum(sol, ys, 'train test, train d-> test d')
-    var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
-    err_of_avg = jnp.mean(jnp.abs(1 -mean))
+    err_a = regress(all_points)
+    all_points, ps = ein.pack( (orbits_b, orbits_a), '* wh' )
+    err_b = regress(all_points)
 
-    results[iteration] = (k_weird_err, err_of_avg)
+    results[iteration] = (k_weird_err, err_a, err_b)
 
+# %%
 colors = jnp.array([a*10+b for a, b in colors])
 fig, ax = plt.subplots()
+ax.scatter( results[:, 0], jnp.mean(results[:, 1:], axis=1), c=colors )
+ax.set_xlabel('spectral')
+ax.set_ylabel('regression')
+ax.plot([0, 1.5], [0, 1.5], ls='--')
+plt.show()
+# %%
+fig, ax = plt.subplots()
 ax.scatter( results[:, 0], results[:, 1], c=colors )
+ax.set_xlabel('spectral')
+ax.set_ylabel('regression')
+ax.plot([0, 1.5], [0, 1.5], ls='--')
+plt.show()
+
+fig, ax = plt.subplots()
+ax.scatter( results[:, 0], results[:, 2], c=colors )
 ax.set_xlabel('spectral')
 ax.set_ylabel('regression')
 ax.plot([0, 1.5], [0, 1.5], ls='--')
