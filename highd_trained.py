@@ -24,7 +24,7 @@ Ensemble = List[Tuple[Array, Array] | Tuple[()]]
 SEED = 124
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 250
+N_PAIRS = 100
 N_IMGS = 60_000
 IN_SHAPE = 784
 HIDDEN_DIM = 512
@@ -33,7 +33,7 @@ W_std = 1.
 b_std = 1.
 N_EPOCHS = 15_000
 REG = 1e-5
-out_path = Path('results/highd_trained_weirdinit')
+out_path = Path('results/highd_trained_3layers')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -46,6 +46,8 @@ orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 in_shape = images[0].flatten().shape
 # network and NTK
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
+    nt.stax.Dense(HIDDEN_DIM, W_std=W_std, b_std=b_std),
+    nt.stax.Relu(),
     nt.stax.Dense(HIDDEN_DIM, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
