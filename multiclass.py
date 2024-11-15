@@ -80,7 +80,7 @@ def k_one_vs_many(orbits, idx):
 
 
 angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
-all_orbits = make_orbit(images, angles)
+# all_orbits = make_orbit(images, angles)
 results = np.empty( (N_TESTS, 2*CLASSES_PER_TEST) )
 RNG, test_key = jr.split(RNG)
 test_keys = jr.split(test_key, N_TESTS)
@@ -92,9 +92,10 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     key, k_classes = jr.split(key)
     k_classes = jr.split(key, CLASSES_PER_TEST)
     idxs = [jr.choice(k, jnp.argwhere(labels == c), replace=False, shape=(NUM_SEEDS,)) for k, c in zip(k_classes, classes)]
-    idxs = jnp.array(idxs).squeeze()
-    orbits = all_orbits[idxs]
-    orbits = ein.rearrange( orbits, 'cls seed angle w h -> cls seed angle (w h)' )
+    flat_idxs = ein.rearrange(jnp.array(idxs), 'cls seed 1 -> (cls seed)')
+    orbits = make_orbit(images[flat_idxs], angles)
+    orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)',
+        cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
     # select one of the three classes; use that as reference, and all the others as "rest of the world"
     ks = jnp.array(
         [k_one_vs_many(orbits, c) for c in range(CLASSES_PER_TEST)]
@@ -106,16 +107,27 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     # sp_err = jax.vmap(jax.vmap(jax.vmap(circulant_error, in_axes=(0,)), in_axes=(1,)), in_axes=(2,))(ks)
     # sp_err = ein.reduce(sp_err, 'refcls othercls -> refcls', 'max')
 
-    flat_k = ein.reduce(ks, 'r o sa sb i j -> (r o) i j', 'mean')
+    # flat_k = ein.reduce(ks, 'r o sa sb i j -> (r o) i j', 'mean')
+    # flat_kc = jax.vmap(make_circulant)(flat_k)
+    # sp_err = jax.vmap(circulant_error)(flat_kc)
+    # # sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
+    # #     r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
+    # # )
+    # sp_err = ein.rearrange(sp_err, '(r o) -> r o', r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1)
+    # # sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'mean')
+    # sp_err = ein.reduce(sp_err, 'r o -> r', 'max')
+    # # sp_err = ein.reduce(sp_err, 'r o -> r', 'mean')
+
+    flat_k = ein.rearrange(ks, 'r o sa sb i j -> (r o sa sb) i j')
     flat_kc = jax.vmap(make_circulant)(flat_k)
     sp_err = jax.vmap(circulant_error)(flat_kc)
-    # sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
-    #     r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
-    # )
-    sp_err = ein.rearrange(sp_err, '(r o) -> r o', r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1)
-    # sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'mean')
-    sp_err = ein.reduce(sp_err, 'r o -> r', 'max')
-    # sp_err = ein.reduce(sp_err, 'r o -> r', 'mean')
+    sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
+        r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
+    )
+    # sp_err = ein.rearrange(sp_err, '(r o) -> r o', r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1)
+    sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'max')
+    sp_err = ein.reduce(sp_err, 'r o sa -> r o', 'mean')
+    sp_err = ein.reduce(sp_err, 'r o -> r', 'mean')
 
 
     # solve regression
