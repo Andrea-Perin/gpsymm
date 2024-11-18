@@ -26,10 +26,11 @@ plt.style.use('myplots.mlpstyle')
 
 # %% Parameters
 SEED = 124
+TEMP = 0.
 RNG = jr.PRNGKey(SEED)
-NUM_ANGLES = 8
-NUM_SEEDS = 16
-N_TESTS = 1024
+NUM_ANGLES = 16
+NUM_SEEDS = 13
+N_TESTS = 512
 REG = 1e-4
 N_IMGS = 60_000
 N_CLASSES = 10
@@ -78,9 +79,26 @@ def regress(points):
     return jnp.mean(jnp.abs(1 -mean))
 
 
-angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
-all_orbits = make_orbit(images, angles)
+# @jax.jit
+# def weird_err(orbit_a, orbit_b):
+#     orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
+#     out = jax.vmap(jax.vmap(kernel_fn), in_axes=(1,))(orbit_pairs).ntk
+#     flatout = ein.rearrange(out, 'sa sb i j -> (sa sb) i j')
+#     k_circ_flat = jax.vmap(make_circulant)(flatout)
+#     # considering interactions between seeds of same class
+#     orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
+#     k = kernel_fn(
+#         orbit_pairs,
+#         ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
+#     ).ntk
+#     kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
+#     kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
+#     kcirc = jax.vmap(make_circulant)(kflatsymm)
+#     sp_err = jax.vmap(circulant_error)(kcirc)
+#     return jnp.mean(sp_err)
 
+
+angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
 results = np.empty( (N_TESTS, 3) )
 colors = []
 RNG, test_key = jr.split(RNG)
@@ -90,17 +108,71 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     key, kab, ka, kb = jr.split(key, num=4)
     class_a, class_b = jnp.sort(jr.choice(kab, N_CLASSES, replace=False, shape=(2,)))
     colors.append( (class_a, class_b) )
-    idxs_a = jr.choice(ka, jnp.argwhere(labels == class_a), replace=False, shape=(NUM_SEEDS,)).squeeze()
-    idxs_b = jr.choice(kb, jnp.argwhere(labels == class_b), replace=False, shape=(NUM_SEEDS,)).squeeze()
-    orbits_a = ein.rearrange(all_orbits[idxs_a], 'seed angle w h -> seed angle (w h)')
-    orbits_b = ein.rearrange(all_orbits[idxs_b], 'seed angle w h -> seed angle (w h)')
+    idxs_a = jr.choice(ka, jnp.argwhere(labels == class_a), replace=False, shape=(NUM_SEEDS,))[:, 0]
+    idxs_b = jr.choice(kb, jnp.argwhere(labels == class_b), replace=False, shape=(NUM_SEEDS,))[:, 0]
+    orbits_a = ein.rearrange(
+        make_orbit(images[idxs_a], angles) ,
+        'seed angle w h -> seed angle (w h)')
+    orbits_b = ein.rearrange(
+        make_orbit(images[idxs_b], angles+jnp.pi/NUM_ANGLES),
+        'seed angle w h -> seed angle (w h)')
 
     # First with weird
     orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
     out = jax.vmap(jax.vmap(kernel_fn), in_axes=(1,))(orbit_pairs).ntk
-    k_weird = ein.reduce(out, 'seeda seedb i j -> i j', 'mean')
-    k_weird_circ = make_circulant(k_weird)
-    k_weird_err = circulant_error(k_weird_circ)
+    flatout = ein.rearrange(out, 'sa sb i j -> (sa sb) i j')
+    k_circ_flat = jax.vmap(make_circulant)(flatout)
+
+    # considering interactions between seeds of same class
+    orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
+    k = kernel_fn(
+        orbit_pairs,
+        ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
+    ).ntk
+    kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
+    breakpoint()
+    kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
+    kcirc = jax.vmap(make_circulant)(kflatsymm)
+    sp_err = jax.vmap(circulant_error)(kcirc)
+    sp_err = jnp.mean(sp_err)
+
+
+    # k_mean = ein.reduce(k, '... i j -> i j', 'mean')
+    # k_circ = make_circulant(k_mean)
+    # sp_err = circulant_error(k_circ)
+
+    # maximizing the error
+    # sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
+    # sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
+    # sp_err_a = ein.reduce(sp_err, 'sa sb -> sa', 'max')
+    # sp_err_a = ein.reduce(sp_err_a, 'sa ->', 'mean')
+    # sp_err_b = ein.reduce(sp_err, 'sa sb -> sb', 'max')
+    # sp_err_b = ein.reduce(sp_err_b, 'sb ->', 'mean')
+    # sp_err = (sp_err_a + sp_err_b)/2
+
+    # errors of average (weighted)
+    # k_circ = ein.rearrange(k_circ_flat, '(sa sb) i j -> sa sb i j', sa=NUM_SEEDS, sb=NUM_SEEDS)
+    # k_circ_powers = ein.rearrange(
+    #     jax.vmap(circulant_error)(k_circ_flat),
+    #     '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS
+    # )
+    # # k_circ_powers = ein.einsum(k_circ[..., 0]**2, 'sa sb i -> sa sb')
+    # # k_circ_powers = k_circ[..., 0, 1]**2
+    # a_soft = NUM_SEEDS * jax.nn.softmax(TEMP * k_circ_powers, axis=-1)[..., None, None]
+    # b_soft = NUM_SEEDS * jax.nn.softmax(TEMP * k_circ_powers, axis=0)[..., None, None]
+    # avg_over_b = ein.reduce( k_circ  * a_soft, 'sa sb i j -> i j', 'mean' )
+    # avg_over_a = ein.reduce( k_circ  * b_soft, 'sa sb i j -> i j', 'mean' )
+    # sp_err = ( circulant_error(avg_over_a) + circulant_error(avg_over_b) ) / 2
+
+    # average of errors
+    # sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
+    # sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
+    # sp_err_avg = ein.reduce(sp_err, 'sa sb ->', 'mean')
+
+    # Errors of average (unweighted)
+    # k_weird = ein.reduce(out, 'seeda seedb i j -> i j', 'mean')
+    # k_weird_circ = make_circulant(k_weird)
+    # sp_err = circulant_error(k_weird_circ)
 
     # Then with "normal"
     all_points, ps = ein.pack( (orbits_a, orbits_b), '* wh' )
@@ -108,27 +180,34 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     all_points, ps = ein.pack( (orbits_b, orbits_a), '* wh' )
     err_b = regress(all_points)
 
-    results[iteration] = (k_weird_err, err_a, err_b)
+    results[iteration] = (sp_err, err_a, err_b)
 
 # %%
 colors = jnp.array([a*10+b for a, b in colors])
 fig, ax = plt.subplots()
-ax.scatter( results[:, 0], jnp.mean(results[:, 1:], axis=1), c=colors )
+ax.scatter( results[:, 0], jnp.mean(results[:, 1:], axis=1), c=colors, s=2 )
+ax.set_title(f'Error of the mean max error')
+# ax.set_title(f'Error of the weighted average (based on nn angle)')
 ax.set_xlabel('spectral')
 ax.set_ylabel('regression')
-ax.plot([0, 1.5], [0, 1.5], ls='--')
+ax.plot([0, 1.5], [0, 1.5], ls='--', color='k')
+ax.plot([0, 2], [1, 1], ls='--', color='k')
+ax.plot([1, 1], [0, 2], ls='--', color='k')
+ax.set_xlim([0, None])
+ax.set_ylim([0, None])
+# plt.savefig(f'multiple_seeds_mean_of_max_err.pdf')
 plt.show()
-# %%
-fig, ax = plt.subplots()
-ax.scatter( results[:, 0], results[:, 1], c=colors )
-ax.set_xlabel('spectral')
-ax.set_ylabel('regression')
-ax.plot([0, 1.5], [0, 1.5], ls='--')
-plt.show()
+# # %%
+# fig, ax = plt.subplots()
+# ax.scatter( results[:, 0], results[:, 1], c=colors )
+# ax.set_xlabel('spectral')
+# ax.set_ylabel('regression')
+# ax.plot([0, 1.5], [0, 1.5], ls='--')
+# plt.show()
 
-fig, ax = plt.subplots()
-ax.scatter( results[:, 0], results[:, 2], c=colors )
-ax.set_xlabel('spectral')
-ax.set_ylabel('regression')
-ax.plot([0, 1.5], [0, 1.5], ls='--')
-plt.show()
+# fig, ax = plt.subplots()
+# ax.scatter( results[:, 0], results[:, 2], c=colors )
+# ax.set_xlabel('spectral')
+# ax.set_ylabel('regression')
+# ax.plot([0, 1.5], [0, 1.5], ls='--')
+# plt.show()
