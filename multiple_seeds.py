@@ -28,7 +28,7 @@ plt.style.use('myplots.mlpstyle')
 SEED = 124
 TEMP = 0.
 RNG = jr.PRNGKey(SEED)
-NUM_ANGLES = 16
+NUM_ANGLES = 8
 NUM_SEEDS = 13
 N_TESTS = 512
 REG = 1e-4
@@ -79,25 +79,6 @@ def regress(points):
     return jnp.mean(jnp.abs(1 -mean))
 
 
-# @jax.jit
-# def weird_err(orbit_a, orbit_b):
-#     orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
-#     out = jax.vmap(jax.vmap(kernel_fn), in_axes=(1,))(orbit_pairs).ntk
-#     flatout = ein.rearrange(out, 'sa sb i j -> (sa sb) i j')
-#     k_circ_flat = jax.vmap(make_circulant)(flatout)
-#     # considering interactions between seeds of same class
-#     orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
-#     k = kernel_fn(
-#         orbit_pairs,
-#         ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
-#     ).ntk
-#     kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
-#     kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
-#     kcirc = jax.vmap(make_circulant)(kflatsymm)
-#     sp_err = jax.vmap(circulant_error)(kcirc)
-#     return jnp.mean(sp_err)
-
-
 angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
 results = np.empty( (N_TESTS, 3) )
 colors = []
@@ -114,7 +95,7 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
         make_orbit(images[idxs_a], angles) ,
         'seed angle w h -> seed angle (w h)')
     orbits_b = ein.rearrange(
-        make_orbit(images[idxs_b], angles+jnp.pi/NUM_ANGLES),
+        make_orbit(images[idxs_b], angles), #+jnp.pi/NUM_ANGLES),
         'seed angle w h -> seed angle (w h)')
 
     # First with weird
@@ -124,17 +105,16 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     k_circ_flat = jax.vmap(make_circulant)(flatout)
 
     # considering interactions between seeds of same class
-    orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
-    k = kernel_fn(
-        orbit_pairs,
-        ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
-    ).ntk
-    kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
-    breakpoint()
-    kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
-    kcirc = jax.vmap(make_circulant)(kflatsymm)
-    sp_err = jax.vmap(circulant_error)(kcirc)
-    sp_err = jnp.mean(sp_err)
+    # orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
+    # k = kernel_fn(
+    #     orbit_pairs,
+    #     ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
+    # ).ntk
+    # kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
+    # kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
+    # kcirc = jax.vmap(make_circulant)(kflatsymm)
+    # sp_err = jax.vmap(circulant_error)(kcirc)
+    # sp_err = jnp.mean(sp_err)
 
 
     # k_mean = ein.reduce(k, '... i j -> i j', 'mean')
@@ -167,12 +147,12 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     # average of errors
     # sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
     # sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
-    # sp_err_avg = ein.reduce(sp_err, 'sa sb ->', 'mean')
+    # sp_err = ein.reduce(sp_err, 'sa sb ->', 'mean')
 
     # Errors of average (unweighted)
-    # k_weird = ein.reduce(out, 'seeda seedb i j -> i j', 'mean')
-    # k_weird_circ = make_circulant(k_weird)
-    # sp_err = circulant_error(k_weird_circ)
+    k_weird = ein.reduce(out, 'seeda seedb i j -> i j', 'mean')
+    k_weird_circ = make_circulant(k_weird)
+    sp_err = circulant_error(k_weird_circ)
 
     # Then with "normal"
     all_points, ps = ein.pack( (orbits_a, orbits_b), '* wh' )

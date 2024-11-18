@@ -13,7 +13,7 @@ from pathlib import Path
 
 from mnist_utils import load_images, load_labels, normalize_mnist
 from data_utils import three_shear_rotate, xshift_img, kronmap
-from gp_utils import kreg, circulant_error, make_circulant, extract_components
+from gp_utils import kreg, circulant_error, make_circulant, extract_components, circulant_predict
 from plot_utils import cm, cloudplot, add_spines
 
 import matplotlib as mpl
@@ -27,13 +27,14 @@ plt.style.use('myplots.mlpstyle')
 # %% Parameters
 SEED = 12
 RNG = jr.PRNGKey(SEED)
-NUM_ANGLES = 16
+NUM_ANGLES = 8
 NUM_SEEDS = 10
 N_TESTS = 300
 REG = 1e-4
+CLASSES_PER_TEST = 3  # how many classes to use per test
+
 N_IMGS = 60_000
 N_CLASSES = 10  # how many classes in MNIST
-CLASSES_PER_TEST = 10  # how many classes to use per test
 out_path = Path('images/highd')
 out_path.mkdir(parents=True, exist_ok=True)
 
@@ -67,7 +68,7 @@ def concat_interleave(oa, ob):
 
 def peelmap(fn, num):
     for n in range(num):
-        fn = jax.vmap(fn, in_axes=(n,))
+        fn = jax.vmap(fn)
     return fn
 
 
@@ -96,7 +97,19 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
     orbits = make_orbit(images[flat_idxs], angles)
     orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)',
         cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
-    # select one of the three classes; use that as reference, and all the others as "rest of the world"
+    # now we compute class vs class kernel matrices
+    orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
+    kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
+    avg_k = ein.reduce(kernels, 'ca cb sa sb i j -> ca cb i j', 'mean')
+    avg_kc = peelmap(make_circulant, 2)(avg_k)
+    preds = peelmap(circulant_predict, 4)(kernels[..., 0])
+    # remove the second diagonal
+    preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(preds)], '* cb sa sb' )
+    avg_preds = ein.reduce(preds, 'ca cb sa sb -> ca sa sb', 'mean')
+
+
+
+    # select one of the classes; use that as reference, and all the others as "rest of the world"
     ks = jnp.array(
         [k_one_vs_many(orbits, c) for c in range(CLASSES_PER_TEST)]
     )
@@ -120,18 +133,23 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
 
     flat_k = ein.rearrange(ks, 'r o sa sb i j -> (r o sa sb) i j')
     flat_kc = jax.vmap(make_circulant)(flat_k)
-    sp_err = jax.vmap(circulant_error)(flat_kc)
-    sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
-        r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
-    )
-    # sp_err = ein.rearrange(sp_err, '(r o) -> r o', r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1)
-    sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'max')
-    sp_err = ein.reduce(sp_err, 'r o sa -> r o', 'mean')
-    sp_err = ein.reduce(sp_err, 'r o -> r', 'mean')
+    avg_kc = ein.reduce(flat_kc, '(r o sa sb) i j -> r i j', 'mean', o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS)
+    breakpoint()
+    sp_pred = jax.vmap(circulant_predict)(avg_kc[..., 0])
+
+
+    # sp_err = jax.vmap(circulant_error)(flat_kc)
+    # sp_err = ein.rearrange(sp_err, '(r o sa sb) -> r o sa sb',
+    #     r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1, sa=NUM_SEEDS, sb=NUM_SEEDS
+    # )
+    # # sp_err = ein.rearrange(sp_err, '(r o) -> r o', r=CLASSES_PER_TEST, o=CLASSES_PER_TEST-1)
+    # sp_err = ein.reduce(sp_err, 'r o sa sb -> r o sa', 'mean')
+    # sp_err = ein.reduce(sp_err, 'r o sa -> r o', 'mean')
+    # sp_err = ein.reduce(sp_err, 'r o -> r', 'mean')
 
 
     # solve regression
-    one_vs_rest_err = []
+    one_vs_rest_pred = []
     for cls in range(CLASSES_PER_TEST):
         all_points = ein.rearrange(
             jnp.roll(orbits, -cls, axis=0),
@@ -146,23 +164,22 @@ for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
         k22 = whole_kernel[idxs][:, idxs]
         ys = jnp.array([+1.] * (NUM_SEEDS) * (NUM_ANGLES-1) + [-1.] * NUM_SEEDS * NUM_ANGLES * (CLASSES_PER_TEST - 1))[:, None]
         sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
-        mean = ein.einsum(sol, ys, 'train test, train d -> test d')
-        var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
-        err_of_avg = jnp.mean(jnp.abs(1 - mean))
-        one_vs_rest_err.append(err_of_avg)
+        pred = ein.einsum(sol, ys, 'train test, train d -> test d')
+        breakpoint()
+        one_vs_rest_pred.append(pred)
 
     # log results
-    results[iteration] = (*sp_err.tolist(), *one_vs_rest_err)
+    results[iteration] = (*sp_pred.tolist(), *one_vs_rest_pred)
 
 
 # %%
-fig, axs = plt.subplots(nrows=1, ncols=CLASSES_PER_TEST, figsize=(20, 4), sharex=True, sharey=True)
+fig, axs = plt.subplots(nrows=1, ncols=CLASSES_PER_TEST, figsize=(4, 4), sharex=True, sharey=True)
 fig.supxlabel('spectral')
 fig.supylabel('empirical')
 for idx, ax in enumerate(axs.flatten()):
     ax.scatter(results[:, idx], results[:, CLASSES_PER_TEST+idx], alpha=.1)
     ax.plot([0, 1.5], [0, 1.5], ls='--', color='k')
-plt.savefig('multiclass_plot_1.png')
+# plt.savefig('multiclass_plot_1.png')
 plt.show()
 
 # %%

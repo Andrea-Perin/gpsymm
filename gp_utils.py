@@ -56,6 +56,25 @@ def kreg(
     return mean, var
 
 
+def circulant_predict(k: Float[Array, 'n'], reg: float = 1e-5) -> Scalar:
+    """
+    Calculate the prediction for a 2-class setting with interleaved points.
+
+    This function assumes a scenario where there are two classes, each with N elements,
+    and the points are interleaved (i.e., the classes alternate in the sequence).
+    The prediction is calculated based on the circulant structure of the kernel matrix.
+
+    Args:
+        k: The kernel matrix.
+        reg: Regularization parameter.
+
+    Returns:
+        float: The prediction for the interleaved 2-class setting.
+    """
+    isp = 1 / jnp.abs(jnp.fft.fft(k) + reg)
+    return 1 - isp[len(isp)//2] / jnp.mean(isp)
+
+
 def circulant_error(k: Float[Array, 'n n'], reg: float = 1e-5) -> Scalar:
     """
     Calculate the prediction error for a 2-class setting with interleaved points.
