@@ -28,15 +28,15 @@ plt.style.use('myplots.mlpstyle')
 SEED = 12
 RNG = jr.PRNGKey(SEED)
 
-NUM_ANGLES = 8
+ANGLES = [8, 4, 2]
 NUM_SEEDS = 13
-N_TESTS = 30
+N_TESTS = 300
 REG = 1e-4
 CLASSES_PER_TEST = 10  # how many classes to use per test
 
 N_IMGS = 60_000
 N_CLASSES = 10  # how many classes in MNIST
-out_path = Path('images/highd')
+out_path = Path('results/m_classification')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -73,65 +73,56 @@ def peelmap(fn, num):
     return fn
 
 
-angles = jnp.linspace(0, 2*jnp.pi, NUM_ANGLES, endpoint=False)
-RNG, test_key = jr.split(RNG)
-test_keys = jr.split(test_key, N_TESTS)
-spectral_preds = np.empty( (N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
-regression_preds = np.empty( (N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+spectral_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+regression_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+for ia, nangles in enumerate(ANGLES):
+    angles = jnp.linspace(0, 2*jnp.pi, nangles, endpoint=False)
+    RNG, test_key = jr.split(RNG)
+    test_keys = jr.split(test_key, N_TESTS)
 
-for iteration, key in tqdm(zip(range(N_TESTS), test_keys)):
-    # pick data
-    key, kab = jr.split(key)
-    classes = jr.choice(kab, N_CLASSES, replace=False, shape=(CLASSES_PER_TEST, ))
-    classes = jnp.sort(classes)
-    key, k_classes = jr.split(key)
-    k_classes = jr.split(key, CLASSES_PER_TEST)
-    idxs = [jr.choice(k, jnp.argwhere(labels == c), replace=False, shape=(NUM_SEEDS,)) for k, c in zip(k_classes, classes)]
-    flat_idxs = ein.rearrange(jnp.array(idxs), 'cls seed 1 -> (cls seed)')
-    orbits = make_orbit(images[flat_idxs], angles)
-    orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)',
-        cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
+    for iteration, key in tqdm(zip(range(N_TESTS), test_keys), total=N_TESTS):
+        # pick data
+        key, kab = jr.split(key)
+        classes = jr.choice(kab, N_CLASSES, replace=False, shape=(CLASSES_PER_TEST, ))
+        classes = jnp.sort(classes)
+        key, k_classes = jr.split(key)
+        k_classes = jr.split(key, CLASSES_PER_TEST)
+        idxs = [jr.choice(k, jnp.argwhere(labels == c), replace=False, shape=(NUM_SEEDS,)) for k, c in zip(k_classes, classes)]
+        flat_idxs = ein.rearrange(jnp.array(idxs), 'cls seed 1 -> (cls seed)')
+        orbits = make_orbit(images[flat_idxs], angles)
+        orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)', cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
 
-    # spectral
-    orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
-    kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
-    ckernels = peelmap(make_circulant, 4)(kernels)
-    sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
-    avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
-    # remove diagonal on first two axes (we would be comparing class a to itself)
-    avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
-    corr_avg_preds = avg_sp_preds > 0
-    seed_is_correctly_predicted = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
-    spectral_preds[iteration] = seed_is_correctly_predicted
+        # spectral
+        orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
+        kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
+        ckernels = peelmap(make_circulant, 4)(kernels)
+        sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
+        avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
+        # remove diagonal on first two axes (we would be comparing class a to itself)
+        avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
+        corr_avg_preds = avg_sp_preds > 0
+        corr_preds = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
+        spectral_preds[ia, iteration] = corr_preds
 
-    # regression
-    one_vs_rest_pred = []
-    for cls in range(CLASSES_PER_TEST):
-        all_points = ein.rearrange(
-            jnp.roll(orbits, -cls, axis=0),
-            'cls seed angle wh -> (cls seed angle) wh'
-        )
-        whole_kernel = kernel_fn(all_points, all_points).ntk
-        # LINEAR REGRESSION (on unrotated samples from class A)
-        # we are removing the first angle from JUST class A
-        idxs = jnp.arange(0, NUM_SEEDS*NUM_ANGLES, NUM_ANGLES)
-        k11 = jnp.delete( jnp.delete(whole_kernel, idxs, axis=0), idxs, axis=1 )
-        k12 = jnp.delete( whole_kernel[:, idxs], idxs, axis=0, )
-        k22 = whole_kernel[idxs][:, idxs]
-        ys = jnp.array([+1.] * (NUM_SEEDS) * (NUM_ANGLES-1) + [-1.] * NUM_SEEDS * NUM_ANGLES * (CLASSES_PER_TEST - 1))[:, None]
-        sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
-        pred = ein.einsum(sol, ys, 'train test, train d -> test d')
-        one_vs_rest_pred.append(pred)
-    regression_preds[iteration] = jnp.array(one_vs_rest_pred).squeeze()
+        # regression
+        one_vs_rest_pred = []
+        for cls in range(CLASSES_PER_TEST):
+            all_points = ein.rearrange(
+                jnp.roll(orbits, -cls, axis=0),
+                'cls seed angle wh -> (cls seed angle) wh'
+            )
+            whole_kernel = kernel_fn(all_points, all_points).ntk
+            # LINEAR REGRESSION (on unrotated samples from class A)
+            # we are removing the first angle from JUST class A
+            idxs = jnp.arange(0, NUM_SEEDS*nangles, nangles)
+            k11 = jnp.delete( jnp.delete(whole_kernel, idxs, axis=0), idxs, axis=1 )
+            k12 = jnp.delete( whole_kernel[:, idxs], idxs, axis=0, )
+            k22 = whole_kernel[idxs][:, idxs]
+            ys = jnp.array([+1.] * (NUM_SEEDS) * (nangles-1) + [-1.] * NUM_SEEDS * nangles * (CLASSES_PER_TEST - 1))[:, None]
+            sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
+            pred = ein.einsum(sol, ys, 'train test, train d -> test d')
+            one_vs_rest_pred.append(pred)
+        regression_preds[ia, iteration] = jnp.array(one_vs_rest_pred).squeeze()
 
-# %% Plot results
-regression_is_correct = regression_preds > 0
-avg_regression_correctness = ein.reduce(regression_is_correct, 'test cls seed -> cls seed', 'sum') / N_TESTS
-avg_spectral_correctness = ein.reduce(spectral_preds, 'test cls seed -> cls seed', 'sum') / N_TESTS
-
-fig, axs = plt.subplots(nrows=1, ncols=2)
-axs[0].set_title('regression')
-axs[0].imshow(jnp.log(avg_regression_correctness))
-axs[1].set_title('spectral')
-axs[1].imshow(jnp.log(avg_spectral_correctness))
-plt.show()
+np.save(out_path / 'regression_predictions', regression_preds)
+np.save(out_path / 'spectral_predictions', spectral_preds)
