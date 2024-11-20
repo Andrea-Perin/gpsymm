@@ -12,6 +12,7 @@ import functools as ft
 import itertools as its
 from pathlib import Path
 import optax
+import equinox as eqx
 
 from mnist_utils import load_images, load_labels, normalize_mnist
 from data_utils import three_shear_rotate, xshift_img, kronmap
@@ -67,9 +68,33 @@ def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, m
     )
 
 init_fn, train_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., dropout_rate=.5)
-_, eval_apply_fn, _ = net_maker(W_std=1., b_std=1., mode='test')
+_, eval_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., mode='test')
 kernel_fn = jax.jit(kernel_fn)
-optim = optax.adam(learning_rate=5e-2)
+optim = optax.adamw(learning_rate=5e-2)
+
+
+def kaiming_uniform_pytree(key: PRNGKeyArray, params: PyTree) -> PyTree:
+    """
+    Create a new PyTree with Kaiming uniform initialization, preserving empty tuples.
+
+    Args:
+        key: JAX random key
+        params: PyTree to match structure
+
+    Returns:
+        New PyTree with Kaiming uniform arrays
+    """
+    def init_array(key, param):
+        if isinstance(param, tuple) and len(param) == 0:
+            return ()  # preserve empty tuples
+        fan_in = param.shape[0] if len(param.shape) == 1 else param.shape[1]
+        bound = 1 / jnp.sqrt(fan_in)
+        return jr.uniform(key, shape=param.shape, minval=-bound, maxval=bound)
+
+    leaves, tree = jax.tree_util.tree_flatten(params)
+    keys = jr.split(key, len(leaves))
+    random_leaves = [init_array(k, leaf) for k, leaf in zip(keys, leaves)]
+    return jax.tree_util.tree_unflatten(tree, random_leaves)
 
 
 def train_apply(params, x, key) -> Float[Array, "10"]:
@@ -222,7 +247,7 @@ for ia, nangles in enumerate(ANGLES):
             x_train = jnp.delete(all_xs, idxs, axis=0)
             y_train = jnp.delete(all_ys, idxs, axis=0)
             out_shape, params = init_fn(knet, x_train[0].shape)
-            params = params[:-2]  # remove last two layers
+            params = kaiming_uniform_pytree(knet, params[:-2])  # remove last two layers
             params, losses = train(
                 params,
                 x_train,
