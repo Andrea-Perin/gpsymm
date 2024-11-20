@@ -53,24 +53,27 @@ make_orbit = kronmap(three_shear_rotate, 2)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 find_min_idx = ft.partial(jnp.argmin, axis=1)
 # network and NTK
-W_std, b_std = 1., 1.
-init_fn, apply_fn, kernel_fn = nt.stax.serial(
-    nt.stax.Dense(128, W_std=W_std, b_std=b_std),
-    nt.stax.Relu(),
-    nt.stax.Dropout(),
-    nt.stax.Dense(64, W_std=W_std, b_std=b_std),
-    nt.stax.Relu(),
-    nt.stax.Dropout(),
-    nt.stax.Dense(10, W_std=W_std, b_std=None),
-    nt.stax.Relu(),
-    nt.stax.Dense(1, W_std=W_std, b_std=b_std)
-)
+def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, mode: str = 'train'):
+    return nt.stax.serial(
+        nt.stax.Dense(128, W_std=W_std, b_std=b_std),
+        nt.stax.Relu(),
+        nt.stax.Dropout(rate=dropout_rate, mode=mode),
+        nt.stax.Dense(64, W_std=W_std, b_std=b_std),
+        nt.stax.Relu(),
+        nt.stax.Dropout(rate=dropout_rate, mode=mode),
+        nt.stax.Dense(10, W_std=W_std, b_std=None),
+        nt.stax.Relu(),
+        nt.stax.Dense(1, W_std=W_std, b_std=b_std)
+    )
+
+init_fn, train_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., dropout_rate=.5)
+_, eval_apply_fn, _ = net_maker(W_std=1., b_std=1., mode='test')
 kernel_fn = jax.jit(kernel_fn)
 optim = optax.adam(learning_rate=5e-2)
 
 
-def emp_apply(params, x) -> Float[Array, "10"]:
-    net_out = apply_fn(params, x)
+def train_apply(params, x, key) -> Float[Array, "10"]:
+    net_out = train_apply_fn(params, x, rng=key)
     return jax.nn.log_softmax(net_out)
 
 
@@ -82,9 +85,9 @@ def cross_entropy(
 
 
 def loss(
-    params, x: Float[Array, "batch 28*28"], y: Int[Array, " batch"]
+    params, x: Float[Array, "batch 28*28"], y: Int[Array, " batch"], key: PRNGKeyArray
 ) -> Float[Array, ""]:
-    pred_y = emp_apply(params, x)
+    pred_y = train_apply(params, x, key)
     return cross_entropy(y, pred_y)
 
 
@@ -104,25 +107,29 @@ def train(
         opt_state: PyTree,
         x: Float[Array, "batch 28*28"],
         y: Int[Array, " batch"],
+        key: PRNGKeyArray
     ):
-        loss_value, grads = jax.value_and_grad(loss)(params, x, y)
+        key, knew = jr.split(key)
+        loss_value, grads = jax.value_and_grad(loss)(params, x, y, knew)
         updates, opt_state = optim.update( grads, opt_state, params )
         params = optax.apply_updates(params, updates)
-        return params, opt_state, loss_value
+        return params, opt_state, loss_value, key
 
     keys = jr.split(key, epochs)
     losses = []
     for epoch, key in enumerate(keys):
         # shuffle x and y
-        perm = jr.permutation(key, len(train_x))
+        key, pkey = jr.split(key)
+        perm = jr.permutation(pkey, len(train_x))
         train_x = train_x[perm]
         train_y = train_y[perm]
         for batch_idx in range(len(train_x) // BATCH_SIZE + 1):
-            params, opt_state, train_loss = make_step(
+            params, opt_state, train_loss, key = make_step(
                 params,
                 opt_state,
                 train_x[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
                 train_y[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+                key
             )
             losses.append(train_loss)
     return params, losses
@@ -225,8 +232,13 @@ for ia, nangles in enumerate(ANGLES):
                 key=ktrain
             )
             losses_log.append(np.array(losses))
+            plt.figure()
+            plt.plot(np.array(losses))
+            plt.title(f'Angle: {nangles}, test: {test_idx}, class: {cls}.')
+            plt.savefig(out_path / f'loss_{nangles}_{test_idx}_{cls}.pdf')
             # record prediction of trained net
-            training_preds[ia, test_idx, cls] = jnp.argmax(jnp.exp(emp_apply(params, all_xs[idxs])), axis=-1)
+            net_outs = eval_apply_fn(params, all_xs[idxs], rng=key)  # key here is only needed for API reasons
+            training_preds[ia, test_idx, cls] = jnp.argmax(jnp.exp(net_outs), axis=-1)
 
 
 # %%
