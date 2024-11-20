@@ -30,8 +30,7 @@ plt.style.use('myplots.mlpstyle')
 SEED = 12
 RNG = jr.PRNGKey(SEED)
 
-# ANGLES = [32, 16, 8, 4, 2]
-ANGLES = [16, 8, 4, 2]
+ANGLES = [64, 32, 16, 8, 4, 2]
 NUM_SEEDS = 16
 N_TESTS = 1
 REG = 1e-4
@@ -56,9 +55,13 @@ find_min_idx = ft.partial(jnp.argmin, axis=1)
 # network and NTK
 W_std, b_std = 1., 1.
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
-    nt.stax.Dense(1024, W_std=W_std, b_std=b_std),
+    nt.stax.Dense(128, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-    nt.stax.Dense(N_CLASSES, W_std=W_std, b_std=b_std),
+    nt.stax.Dropout(),
+    nt.stax.Dense(64, W_std=W_std, b_std=b_std),
+    nt.stax.Relu(),
+    nt.stax.Dropout(),
+    nt.stax.Dense(10, W_std=W_std, b_std=None),
     nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
@@ -230,22 +233,14 @@ for ia, nangles in enumerate(ANGLES):
 np.save(out_path / 'regression_predictions', regression_preds)
 np.save(out_path / 'spectral_predictions', spectral_preds)
 np.save(out_path / 'training_predictions', training_preds)
-# %%
-for loss_curve in losses_log:
-    plt.plot(jnp.log(loss_curve))
-plt.show()
 
-plt.imshow(training_preds[0, 0] == np.arange(10)[:, None])
-plt.show()
-
-# %%
-# (angle, test, class, seed)
+# %% Plot
 regression_preds = np.load(out_path / 'regression_predictions.npy')
 spectral_preds = np.load(out_path / 'spectral_predictions.npy')
 training_preds = np.load(out_path / 'training_predictions.npy')
 training_preds_corr = training_preds == np.arange(10)[:, None]
 
-
+# %%
 fig, ax = plt.subplots(nrows=1, ncols=3, sharex=True, sharey=True)
 reg_vs_angle = 1-ein.reduce((regression_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
 sp_vs_angle = 1-ein.reduce((spectral_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
@@ -257,6 +252,8 @@ uncert_train = jnp.std( jnp.mean(training_preds_corr.astype(float), axis=(1, 3))
 
 # reg_vs_angle_std = 2 * jnp.std(regression_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
 # sp_vs_angle_std = 2 * jnp.std(spectral_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
+for ax_ in ax:
+    ax_.set_xscale('log')
 ax[0].plot(ANGLES, reg_vs_angle, '-o')
 # ax[0].fill_between(ANGLES, reg_vs_angle - uncert_reg, reg_vs_angle + uncert_reg, alpha=.2)
 ax[0].set_title('regression vs angle')
