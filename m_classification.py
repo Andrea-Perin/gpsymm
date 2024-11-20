@@ -9,7 +9,9 @@ import einops as ein
 import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
+import itertools as its
 from pathlib import Path
+import optax
 
 from mnist_utils import load_images, load_labels, normalize_mnist
 from data_utils import three_shear_rotate, xshift_img, kronmap
@@ -28,11 +30,15 @@ plt.style.use('myplots.mlpstyle')
 SEED = 12
 RNG = jr.PRNGKey(SEED)
 
-ANGLES = [8, 4, 2]
-NUM_SEEDS = 13
-N_TESTS = 300
+# ANGLES = [32, 16, 8, 4, 2]
+ANGLES = [16, 8, 4, 2]
+NUM_SEEDS = 16
+N_TESTS = 1
 REG = 1e-4
 CLASSES_PER_TEST = 10  # how many classes to use per test
+
+N_EPOCHS = 5000
+BATCH_SIZE = 1024
 
 N_IMGS = 60_000
 N_CLASSES = 10  # how many classes in MNIST
@@ -50,13 +56,74 @@ find_min_idx = ft.partial(jnp.argmin, axis=1)
 # network and NTK
 W_std, b_std = 1., 1.
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
-    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    nt.stax.Dense(1024, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    nt.stax.Dense(N_CLASSES, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
+optim = optax.adam(learning_rate=5e-2)
+
+
+def emp_apply(params, x) -> Float[Array, "10"]:
+    net_out = apply_fn(params, x)
+    return jax.nn.log_softmax(net_out)
+
+
+def cross_entropy(
+    y: Int[Array, " batch"], pred_y: Float[Array, "batch 10"]
+) -> Scalar:
+    pred_y = jnp.take_along_axis(pred_y, jnp.expand_dims(y, 1), axis=1)
+    return -jnp.mean(pred_y)
+
+
+def loss(
+    params, x: Float[Array, "batch 28*28"], y: Int[Array, " batch"]
+) -> Float[Array, ""]:
+    pred_y = emp_apply(params, x)
+    return cross_entropy(y, pred_y)
+
+
+def train(
+    params,
+    train_x,
+    train_y,
+    optim,
+    epochs,
+    key
+):
+    opt_state = optim.init(params)
+
+    @jax.jit
+    def make_step(
+        params,
+        opt_state: PyTree,
+        x: Float[Array, "batch 28*28"],
+        y: Int[Array, " batch"],
+    ):
+        loss_value, grads = jax.value_and_grad(loss)(params, x, y)
+        updates, opt_state = optim.update( grads, opt_state, params )
+        params = optax.apply_updates(params, updates)
+        return params, opt_state, loss_value
+
+    keys = jr.split(key, epochs)
+    losses = []
+    for epoch, key in enumerate(keys):
+        # shuffle x and y
+        perm = jr.permutation(key, len(train_x))
+        train_x = train_x[perm]
+        train_y = train_y[perm]
+        for batch_idx in range(len(train_x) // BATCH_SIZE + 1):
+            params, opt_state, train_loss = make_step(
+                params,
+                opt_state,
+                train_x[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+                train_y[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+            )
+            losses.append(train_loss)
+    return params, losses
+
 
 
 mycat = lambda x, y: jnp.concatenate((x, y), axis=0)
@@ -75,13 +142,16 @@ def peelmap(fn, num):
 
 spectral_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 regression_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+training_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+losses_log = []
 for ia, nangles in enumerate(ANGLES):
     angles = jnp.linspace(0, 2*jnp.pi, nangles, endpoint=False)
     RNG, test_key = jr.split(RNG)
     test_keys = jr.split(test_key, N_TESTS)
 
-    for iteration, key in tqdm(zip(range(N_TESTS), test_keys), total=N_TESTS):
+    for test_idx, key in (pbar_out := tqdm(zip(range(N_TESTS), test_keys), total=N_TESTS)):
         # pick data
+        pbar_out.set_description('Picking data')
         key, kab = jr.split(key)
         classes = jr.choice(kab, N_CLASSES, replace=False, shape=(CLASSES_PER_TEST, ))
         classes = jnp.sort(classes)
@@ -93,6 +163,7 @@ for ia, nangles in enumerate(ANGLES):
         orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)', cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
 
         # spectral
+        pbar_out.set_description('Spectral')
         orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
         kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
         ckernels = peelmap(make_circulant, 4)(kernels)
@@ -102,9 +173,10 @@ for ia, nangles in enumerate(ANGLES):
         avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
         corr_avg_preds = avg_sp_preds > 0
         corr_preds = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
-        spectral_preds[ia, iteration] = corr_preds
+        spectral_preds[ia, test_idx] = corr_preds
 
         # regression
+        pbar_out.set_description('Regression')
         one_vs_rest_pred = []
         for cls in range(CLASSES_PER_TEST):
             all_points = ein.rearrange(
@@ -122,7 +194,84 @@ for ia, nangles in enumerate(ANGLES):
             sol = jax.scipy.linalg.solve(k11 + REG*jnp.eye(len(k11)), k12, assume_a='pos')
             pred = ein.einsum(sol, ys, 'train test, train d -> test d')
             one_vs_rest_pred.append(pred)
-        regression_preds[ia, iteration] = jnp.array(one_vs_rest_pred).squeeze()
+        regression_preds[ia, test_idx] = jnp.array(one_vs_rest_pred).squeeze()
 
+        # net training on sampled dataset
+        pbar_out.set_description('Training')
+        for cls in tqdm(range(CLASSES_PER_TEST)):
+            all_ys = ein.repeat(
+                jnp.roll(classes, -cls),
+                'c -> (c n)', n=NUM_SEEDS*nangles
+            )
+            all_xs = ein.rearrange(
+                jnp.roll(orbits, -cls, axis=0),
+                'cls seed angle wh -> (cls seed angle) wh'
+            )
+            key, knet, ktrain = jr.split(key, num=3)
+            idxs = jnp.arange(0, NUM_SEEDS*nangles, nangles)
+            x_train = jnp.delete(all_xs, idxs, axis=0)
+            y_train = jnp.delete(all_ys, idxs, axis=0)
+            out_shape, params = init_fn(knet, x_train[0].shape)
+            params = params[:-2]  # remove last two layers
+            params, losses = train(
+                params,
+                x_train,
+                y_train,
+                optim,
+                epochs=N_EPOCHS,
+                key=ktrain
+            )
+            losses_log.append(np.array(losses))
+            # record prediction of trained net
+            training_preds[ia, test_idx, cls] = jnp.argmax(jnp.exp(emp_apply(params, all_xs[idxs])), axis=-1)
+
+
+# %%
 np.save(out_path / 'regression_predictions', regression_preds)
 np.save(out_path / 'spectral_predictions', spectral_preds)
+np.save(out_path / 'training_predictions', training_preds)
+# %%
+for loss_curve in losses_log:
+    plt.plot(jnp.log(loss_curve))
+plt.show()
+
+plt.imshow(training_preds[0, 0] == np.arange(10)[:, None])
+plt.show()
+
+# %%
+# (angle, test, class, seed)
+regression_preds = np.load(out_path / 'regression_predictions.npy')
+spectral_preds = np.load(out_path / 'spectral_predictions.npy')
+training_preds = np.load(out_path / 'training_predictions.npy')
+training_preds_corr = training_preds == np.arange(10)[:, None]
+
+
+fig, ax = plt.subplots(nrows=1, ncols=3, sharex=True, sharey=True)
+reg_vs_angle = 1-ein.reduce((regression_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
+sp_vs_angle = 1-ein.reduce((spectral_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
+train_vs_angle = 1-ein.reduce(training_preds_corr.astype(float), 'angle test cls seed -> angle test', 'mean')
+
+uncert_reg = jnp.std( jnp.mean(regression_preds > 0, axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
+uncert_sp = jnp.std( jnp.mean(regression_preds > 0, axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
+uncert_train = jnp.std( jnp.mean(training_preds_corr.astype(float), axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
+
+# reg_vs_angle_std = 2 * jnp.std(regression_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
+# sp_vs_angle_std = 2 * jnp.std(spectral_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
+ax[0].plot(ANGLES, reg_vs_angle, '-o')
+# ax[0].fill_between(ANGLES, reg_vs_angle - uncert_reg, reg_vs_angle + uncert_reg, alpha=.2)
+ax[0].set_title('regression vs angle')
+ax[0].set_xlabel('angle')
+ax[0].set_ylabel('error percentage')
+ax[1].plot(ANGLES, sp_vs_angle, '-o')
+# ax[1].fill_between(ANGLES, sp_vs_angle - uncert_sp, sp_vs_angle + uncert_sp, alpha=.2)
+ax[1].set_title('spectral vs angle')
+ax[1].set_xlabel('angle')
+ax[1].set_ylabel('error percentage')
+ax[1].set_ylim([0, None])
+ax[2].plot(ANGLES, train_vs_angle, '-o')
+# ax[2].fill_between(ANGLES, sp_vs_angle - uncert_sp, sp_vs_angle + uncert_sp, alpha=.2)
+ax[2].set_title('train vs angle')
+ax[2].set_xlabel('angle')
+ax[2].set_ylabel('error percentage')
+ax[2].set_ylim([0, None])
+plt.show()
