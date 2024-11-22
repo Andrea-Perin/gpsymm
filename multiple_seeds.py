@@ -107,55 +107,10 @@ for angle_idx, nangles in enumerate(ANGLES):
         flatout = ein.rearrange(out, 'sa sb i j -> (sa sb) i j')
         k_circ_flat = jax.vmap(make_circulant)(flatout)
 
-        # considering interactions between seeds of same class
-        # orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
-        # k = kernel_fn(
-        #     orbit_pairs,
-        #     ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
-        # ).ntk
-        # kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
-        # kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
-        # kcirc = jax.vmap(make_circulant)(kflatsymm)
-        # sp_err = jax.vmap(circulant_error)(kcirc)
-        # sp_err = jnp.mean(sp_err)
-
-
-        # k_mean = ein.reduce(k, '... i j -> i j', 'mean')
-        # k_circ = make_circulant(k_mean)
-        # sp_err = circulant_error(k_circ)
-
-        # maximizing the error
-        # sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
-        # sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
-        # sp_err_a = ein.reduce(sp_err, 'sa sb -> sa', 'max')
-        # sp_err_a = ein.reduce(sp_err_a, 'sa ->', 'mean')
-        # sp_err_b = ein.reduce(sp_err, 'sa sb -> sb', 'max')
-        # sp_err_b = ein.reduce(sp_err_b, 'sb ->', 'mean')
-        # sp_err = (sp_err_a + sp_err_b)/2
-
-        # errors of average (weighted)
-        # k_circ = ein.rearrange(k_circ_flat, '(sa sb) i j -> sa sb i j', sa=NUM_SEEDS, sb=NUM_SEEDS)
-        # k_circ_powers = ein.rearrange(
-        #     jax.vmap(circulant_error)(k_circ_flat),
-        #     '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS
-        # )
-        # # k_circ_powers = ein.einsum(k_circ[..., 0]**2, 'sa sb i -> sa sb')
-        # # k_circ_powers = k_circ[..., 0, 1]**2
-        # a_soft = NUM_SEEDS * jax.nn.softmax(TEMP * k_circ_powers, axis=-1)[..., None, None]
-        # b_soft = NUM_SEEDS * jax.nn.softmax(TEMP * k_circ_powers, axis=0)[..., None, None]
-        # avg_over_b = ein.reduce( k_circ  * a_soft, 'sa sb i j -> i j', 'mean' )
-        # avg_over_a = ein.reduce( k_circ  * b_soft, 'sa sb i j -> i j', 'mean' )
-        # sp_err = ( circulant_error(avg_over_a) + circulant_error(avg_over_b) ) / 2
-
         # average of errors
-        # sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
-        # sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
-        # sp_err = ein.reduce(sp_err, 'sa sb ->', 'mean')
-
-        # Errors of average (unweighted)
-        k_weird = ein.reduce(out, 'seeda seedb i j -> i j', 'mean')
-        k_weird_circ = make_circulant(k_weird)
-        sp_err = circulant_error(k_weird_circ)
+        sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
+        sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
+        sp_err = ein.reduce(sp_err, 'sa sb ->', 'mean')
 
         # Then with "normal"
         all_points, ps = ein.pack( (orbits_a, orbits_b), '* wh' )
@@ -202,8 +157,8 @@ for angle_idx, ax in enumerate(grid):
     ax.set_yticks([0, 1, 2])
 
 # Add labels
-fig.text(0.5, 0.15, 'Spectral error', ha='center', fontsize=10)
-fig.text(0.0, 0.5, 'Empirical error', va='center', rotation='vertical', fontsize=10)
+fig.text(0.5, 0.15, 'Symm. empirical error (NTK)', ha='center', fontsize=10)
+fig.text(0.0, 0.5, 'Spectral error', va='center', rotation='vertical', fontsize=10)
 
 # Colorbar will be automatically added to the last image
 grid.cbar_axes[0].colorbar(sc, format=lambda x, _: f'{100*x:.0f}%')
@@ -211,3 +166,50 @@ grid.cbar_axes[0].set_ylabel('Corr. class \%', fontsize=10)
 
 plt.tight_layout()
 plt.show()
+
+# JUNK
+
+# considering interactions between seeds of same class
+# orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
+# k = kernel_fn(
+#     orbit_pairs,
+#     ein.rearrange(orbit_pairs, 'sa sb a wh -> sb sa a wh')
+# ).ntk
+# kflat = ein.rearrange(k, 'sa sb sap sbp i j -> (sa sb sap sbp) i j', sa=NUM_SEEDS, sb=NUM_SEEDS, sap=NUM_SEEDS, sbp=NUM_SEEDS)
+# kflatsymm = (kflat + kflat.transpose((0, 2, 1)))/2
+# kcirc = jax.vmap(make_circulant)(kflatsymm)
+# sp_err = jax.vmap(circulant_error)(kcirc)
+# sp_err = jnp.mean(sp_err)
+
+
+# k_mean = ein.reduce(k, '... i j -> i j', 'mean')
+# k_circ = make_circulant(k_mean)
+# sp_err = circulant_error(k_circ)
+
+# maximizing the error
+# sp_err_flat = jax.vmap(circulant_error)(k_circ_flat)
+# sp_err = ein.rearrange(sp_err_flat, '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS)
+# sp_err_a = ein.reduce(sp_err, 'sa sb -> sa', 'max')
+# sp_err_a = ein.reduce(sp_err_a, 'sa ->', 'mean')
+# sp_err_b = ein.reduce(sp_err, 'sa sb -> sb', 'max')
+# sp_err_b = ein.reduce(sp_err_b, 'sb ->', 'mean')
+# sp_err = (sp_err_a + sp_err_b)/2
+
+# errors of average (weighted)
+# k_circ = ein.rearrange(k_circ_flat, '(sa sb) i j -> sa sb i j', sa=NUM_SEEDS, sb=NUM_SEEDS)
+# k_circ_powers = ein.rearrange(
+#     jax.vmap(circulant_error)(k_circ_flat),
+#     '(sa sb) -> sa sb', sa=NUM_SEEDS, sb=NUM_SEEDS
+# )
+# # k_circ_powers = ein.einsum(k_circ[..., 0]**2, 'sa sb i -> sa sb')
+# # k_circ_powers = k_circ[..., 0, 1]**2
+# a_soft = NUM_SEEDS * jax.nn.softmax(TEMP * k_circ_powers, axis=-1)[..., None, None]
+# b_soft = NUM_SEEDS * jax.nn.softmax(TEMP * k_circ_powers, axis=0)[..., None, None]
+# avg_over_b = ein.reduce( k_circ  * a_soft, 'sa sb i j -> i j', 'mean' )
+# avg_over_a = ein.reduce( k_circ  * b_soft, 'sa sb i j -> i j', 'mean' )
+# sp_err = ( circulant_error(avg_over_a) + circulant_error(avg_over_b) ) / 2
+
+# Errors of average (unweighted)
+# k_weird = ein.reduce(out, 'seeda seedb i j -> i j', 'mean')
+# k_weird_circ = make_circulant(k_weird)
+# sp_err = circulant_error(k_weird_circ)
