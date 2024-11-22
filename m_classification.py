@@ -31,14 +31,14 @@ plt.style.use('myplots.mlpstyle')
 SEED = 12
 RNG = jr.PRNGKey(SEED)
 
-ANGLES = [64, 32, 16, 8, 4, 2]
-NUM_SEEDS = 16
+ANGLES = [32, 16, 8, 4, 2]
+NUM_SEEDS = 2
 N_TESTS = 1
 REG = 1e-4
 CLASSES_PER_TEST = 10  # how many classes to use per test
 
-N_EPOCHS = 5000
-BATCH_SIZE = 1024
+N_EPOCHS = 10_000
+BATCH_SIZE = 512
 
 N_IMGS = 60_000
 N_CLASSES = 10  # how many classes in MNIST
@@ -56,10 +56,10 @@ find_min_idx = ft.partial(jnp.argmin, axis=1)
 # network and NTK
 def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, mode: str = 'train'):
     return nt.stax.serial(
-        nt.stax.Dense(128, W_std=W_std, b_std=b_std),
+        nt.stax.Dense(512, W_std=W_std, b_std=b_std),
         nt.stax.Relu(),
         nt.stax.Dropout(rate=dropout_rate, mode=mode),
-        nt.stax.Dense(64, W_std=W_std, b_std=b_std),
+        nt.stax.Dense(128, W_std=W_std, b_std=b_std),
         nt.stax.Relu(),
         nt.stax.Dropout(rate=dropout_rate, mode=mode),
         nt.stax.Dense(10, W_std=W_std, b_std=None),
@@ -70,7 +70,7 @@ def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, m
 init_fn, train_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., dropout_rate=.5)
 _, eval_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., mode='test')
 kernel_fn = jax.jit(kernel_fn)
-optim = optax.adamw(learning_rate=5e-2)
+optim = optax.adam(learning_rate=1e-4, b1=0.9, b2=0.7)
 
 
 def kaiming_uniform_pytree(key: PRNGKeyArray, params: PyTree) -> PyTree:
@@ -175,7 +175,7 @@ def peelmap(fn, num):
     return fn
 
 
-spectral_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+# spectral_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 regression_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 training_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 losses_log = []
@@ -197,18 +197,18 @@ for ia, nangles in enumerate(ANGLES):
         orbits = make_orbit(images[flat_idxs], angles)
         orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)', cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
 
-        # spectral
-        pbar_out.set_description('Spectral')
-        orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
-        kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
-        ckernels = peelmap(make_circulant, 4)(kernels)
-        sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
-        avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
-        # remove diagonal on first two axes (we would be comparing class a to itself)
-        avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
-        corr_avg_preds = avg_sp_preds > 0
-        corr_preds = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
-        spectral_preds[ia, test_idx] = corr_preds
+        # # spectral
+        # pbar_out.set_description('Spectral')
+        # orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
+        # kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
+        # ckernels = peelmap(make_circulant, 4)(kernels)
+        # sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
+        # avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
+        # # remove diagonal on first two axes (we would be comparing class a to itself)
+        # avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
+        # corr_avg_preds = avg_sp_preds > 0
+        # corr_preds = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
+        # spectral_preds[ia, test_idx] = corr_preds
 
         # regression
         pbar_out.set_description('Regression')
@@ -258,54 +258,58 @@ for ia, nangles in enumerate(ANGLES):
             )
             losses_log.append(np.array(losses))
             plt.figure()
-            plt.plot(np.array(losses))
+            plt.plot(np.log(np.array(losses)))
             plt.title(f'Angle: {nangles}, test: {test_idx}, class: {cls}.')
             plt.savefig(out_path / f'loss_{nangles}_{test_idx}_{cls}.pdf')
+            plt.close()
             # record prediction of trained net
-            net_outs = eval_apply_fn(params, all_xs[idxs], rng=key)  # key here is only needed for API reasons
-            training_preds[ia, test_idx, cls] = jnp.argmax(jnp.exp(net_outs), axis=-1)
+            net_outs = jax.nn.log_softmax(eval_apply_fn(params, all_xs[idxs], rng=key))  # key here is only needed for API reasons
+            preds = jnp.argmax(jnp.exp(net_outs), axis=-1)
+            print(f"\nClass {cls}, test {test_idx}, angles: {nangles}; error is {1-np.mean(preds==cls)}")
+            # print(f"Class {cls}, test {test_idx}, angles: {nangles}; error is {1-np.mean(preds==cls)}")
+            training_preds[ia, test_idx, cls] = preds
 
 
 # %%
 np.save(out_path / 'regression_predictions', regression_preds)
-np.save(out_path / 'spectral_predictions', spectral_preds)
+# np.save(out_path / 'spectral_predictions', spectral_preds)
 np.save(out_path / 'training_predictions', training_preds)
 
-# %% Plot
-regression_preds = np.load(out_path / 'regression_predictions.npy')
-spectral_preds = np.load(out_path / 'spectral_predictions.npy')
-training_preds = np.load(out_path / 'training_predictions.npy')
-training_preds_corr = training_preds == np.arange(10)[:, None]
+# # %% Plot
+# regression_preds = np.load(out_path / 'regression_predictions.npy')
+# spectral_preds = np.load(out_path / 'spectral_predictions.npy')
+# training_preds = np.load(out_path / 'training_predictions.npy')
+# training_preds_corr = training_preds == np.arange(10)[:, None]
 
-# %%
-fig, ax = plt.subplots(nrows=1, ncols=3, sharex=True, sharey=True)
-reg_vs_angle = 1-ein.reduce((regression_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
-sp_vs_angle = 1-ein.reduce((spectral_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
-train_vs_angle = 1-ein.reduce(training_preds_corr.astype(float), 'angle test cls seed -> angle test', 'mean')
+# # %%
+# fig, ax = plt.subplots(nrows=1, ncols=3, sharex=True, sharey=True)
+# reg_vs_angle = 1-ein.reduce((regression_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
+# sp_vs_angle = 1-ein.reduce((spectral_preds > 0).astype(float), 'angle test cls seed -> angle test', 'mean')
+# train_vs_angle = 1-ein.reduce(training_preds_corr.astype(float), 'angle test cls seed -> angle test', 'mean')
 
-uncert_reg = jnp.std( jnp.mean(regression_preds > 0, axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
-uncert_sp = jnp.std( jnp.mean(regression_preds > 0, axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
-uncert_train = jnp.std( jnp.mean(training_preds_corr.astype(float), axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
+# uncert_reg = jnp.std( jnp.mean(regression_preds > 0, axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
+# uncert_sp = jnp.std( jnp.mean(regression_preds > 0, axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
+# uncert_train = jnp.std( jnp.mean(training_preds_corr.astype(float), axis=(1, 3)), axis=-1 ) / np.sqrt(CLASSES_PER_TEST)
 
-# reg_vs_angle_std = 2 * jnp.std(regression_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
-# sp_vs_angle_std = 2 * jnp.std(spectral_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
-for ax_ in ax:
-    ax_.set_xscale('log')
-ax[0].plot(ANGLES, reg_vs_angle, '-o')
-# ax[0].fill_between(ANGLES, reg_vs_angle - uncert_reg, reg_vs_angle + uncert_reg, alpha=.2)
-ax[0].set_title('regression vs angle')
-ax[0].set_xlabel('angle')
-ax[0].set_ylabel('error percentage')
-ax[1].plot(ANGLES, sp_vs_angle, '-o')
-# ax[1].fill_between(ANGLES, sp_vs_angle - uncert_sp, sp_vs_angle + uncert_sp, alpha=.2)
-ax[1].set_title('spectral vs angle')
-ax[1].set_xlabel('angle')
-ax[1].set_ylabel('error percentage')
-ax[1].set_ylim([0, None])
-ax[2].plot(ANGLES, train_vs_angle, '-o')
-# ax[2].fill_between(ANGLES, sp_vs_angle - uncert_sp, sp_vs_angle + uncert_sp, alpha=.2)
-ax[2].set_title('train vs angle')
-ax[2].set_xlabel('angle')
-ax[2].set_ylabel('error percentage')
-ax[2].set_ylim([0, None])
-plt.show()
+# # reg_vs_angle_std = 2 * jnp.std(regression_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
+# # sp_vs_angle_std = 2 * jnp.std(spectral_preds > 0, axis=(-1, -2, -3)) / np.sqrt(np.array(ANGLES))
+# for ax_ in ax:
+#     ax_.set_xscale('log')
+# ax[0].plot(ANGLES, reg_vs_angle, '-o')
+# # ax[0].fill_between(ANGLES, reg_vs_angle - uncert_reg, reg_vs_angle + uncert_reg, alpha=.2)
+# ax[0].set_title('regression vs angle')
+# ax[0].set_xlabel('angle')
+# ax[0].set_ylabel('error percentage')
+# ax[1].plot(ANGLES, sp_vs_angle, '-o')
+# # ax[1].fill_between(ANGLES, sp_vs_angle - uncert_sp, sp_vs_angle + uncert_sp, alpha=.2)
+# ax[1].set_title('spectral vs angle')
+# ax[1].set_xlabel('angle')
+# ax[1].set_ylabel('error percentage')
+# ax[1].set_ylim([0, None])
+# ax[2].plot(ANGLES, train_vs_angle, '-o')
+# # ax[2].fill_between(ANGLES, sp_vs_angle - uncert_sp, sp_vs_angle + uncert_sp, alpha=.2)
+# ax[2].set_title('train vs angle')
+# ax[2].set_xlabel('angle')
+# ax[2].set_ylabel('error percentage')
+# ax[2].set_ylim([0, None])
+# plt.show()
