@@ -89,9 +89,8 @@ def get_datasets(n_angles: int, lo_class: int = 5, train_test_fraction: float = 
     # mask away the unrotated samples
     lo_mask = torch.logical_and(
         rotmnist.targets == lo_class,
-        torch.arange(len(rotmnist)) // (n_angles*NUM_SEEDS) == 0
-        )
-    breakpoint()
+        torch.arange(len(rotmnist)) < (NUM_SEEDS * 10)
+    )
     lo_idxs = torch.argwhere(lo_mask).flatten().tolist()
     train_intest_idxs = torch.argwhere(~lo_mask).flatten()
     permutation = torch.randperm(len(train_intest_idxs), generator=generator)
