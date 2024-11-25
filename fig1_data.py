@@ -19,7 +19,6 @@ from torchvision.datasets import MNIST
 
 import einops as ein
 from einops.layers.torch import Rearrange, Reduce
-import matplotlib.pyplot as plt
 
 from vit_pytorch import SimpleViT
 
@@ -48,9 +47,8 @@ results_dir.mkdir(parents=True, exist_ok=True)
 n_epochs = 21
 
 # if full experiment is needed
-batch_size = 512
+batch_size = 512*4
 n_angles = [2, 4, 8, 16, 32, 64]
-lo_class = 5
 
 
 # %% Weird dataset thing
@@ -151,7 +149,7 @@ loss_fn = nn.CrossEntropyLoss()
 def get_accuracy(model, loader):
     model.eval()
     corr, tot = 0, 0
-    for imgs, labs in iter(loader):
+    for imgs, labs in loader:
         preds = model(imgs.to(device))
         corr += sum(torch.argmax(preds, dim=1) == labs.to(device))
         tot += len(labs)
@@ -161,7 +159,7 @@ def get_accuracy(model, loader):
 def train(model, optim, loader, loss_fn=loss_fn):
     epoch_losses = []
     model.train(True)
-    for input, target in iter(loader):
+    for input, target in loader:
         optim.zero_grad()
         output = model(input.to(device))
         loss = loss_fn(output, target.to(device))
@@ -175,7 +173,7 @@ def test(model, loader, loss_fn=loss_fn):
     running_loss = 0.
     model.eval()
     with torch.no_grad():
-        for imgs, labs in iter(loader):
+        for imgs, labs in loader:
             outputs = model(imgs.to(device))
             loss = loss_fn(outputs, labs.to(device))
             running_loss += loss
@@ -229,9 +227,9 @@ for lo_digit in range(10):
         print(f"Dataset has {na} angles")
         # make datasets and loaders
         training, intest, outtest = get_datasets(n_angles=na, lo_class=lo_digit)
-        trainloader = DataLoader(training, batch_size=batch_size, shuffle=True)
-        testloader_in = DataLoader(intest, batch_size=batch_size, shuffle=True)
-        testloader_out = DataLoader(outtest, batch_size=batch_size)
+        trainloader = DataLoader(training, batch_size=batch_size, shuffle=True, num_workers=1)
+        testloader_in = DataLoader(intest, batch_size=batch_size, shuffle=True, num_workers=1)
+        testloader_out = DataLoader(outtest, batch_size=batch_size, num_workers=1)
         # reinitialize the models
         model_list = [
             get_mlp().to(device),
@@ -262,4 +260,4 @@ results, _ = ein.pack(
     (train_losses, train_acc, test_acc_in, test_acc_out),
     'd m e *'
 )
-np.save( results_dir / 'eeeeee', results )
+np.save( results_dir / 'fig_1_data', results )
