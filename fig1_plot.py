@@ -25,14 +25,14 @@ angle_idx = 2  # corresponding to 8 angles
 num_rot = ANGLES[angle_idx]
 b_avg = avg_data[angle_idx]
 b_std = std_data[angle_idx]
-b_std = 2*b_std / jnp.sqrt(num_rot)
+c95 = 1.96*b_std / jnp.sqrt(10)
 
 fig, axs = plt.subplots(
     figsize=(8.5*cm, 10*cm),
     nrows=3, ncols=1,
     sharex=True, sharey=True
 )
-for ax, avg, std, name in zip(axs.flatten(), b_avg, b_std, ('MLP', "CNN", 'ViT')):
+for ax, avg, std, name in zip(axs.flatten(), b_avg, c95, ('MLP', "CNN", 'ViT')):
     ax.plot(avg[1], color='black')
     ax.plot(avg[2], color='black', ls='--')
     ax.plot(avg[3], ls='--')
@@ -61,26 +61,27 @@ fig.legend(labels=labels,
     handletextpad=0.2,       # Added to reduce space between handle and text
     borderaxespad=0.1)       # Optional: reduces padding around the legend
 plt.subplots_adjust(top=0.85, bottom=0.1, wspace=0, hspace=0.2)
-plt.savefig(out_dir / 'panelB.pdf', bbox_inches='tight')
+# plt.savefig(out_dir / 'panelB.pdf', bbox_inches='tight')
 plt.show()
 
 
 # %% PANEL C
 data_c = 1-avg_data[:, :, -1, -1]
 std_c = std_data[:, :, -1, -1]
-std_c = 2*std_c / jnp.sqrt(jnp.array(ANGLES)[:, None])
+c95 = 1.96 * std_c / jnp.sqrt(10)
+#std_c = 2*std_c / jnp.sqrt(jnp.array(ANGLES)[:, None])  # TODO: check this one!
 print(f'This should be something of shape (n_angles, n_models); {data_c.shape}')
 
 fig, ax = plt.subplots(figsize=(8.5*cm, 5*cm))
 ax.set_xscale('log', base=2)
 ax.plot(ANGLES, data_c[:, 0], marker='^', label='MLP')
-ax.fill_between(ANGLES, data_c[:, 0]-std_c[:, 0], data_c[:, 0]+std_c[:, 0], alpha=.2)
+ax.fill_between(ANGLES, data_c[:, 0]-c95[:, 0], data_c[:, 0]+c95[:, 0], alpha=.2)
 
 ax.plot(ANGLES, data_c[:, 1], marker='o', label='CNN')
-ax.fill_between(ANGLES, data_c[:, 1]-std_c[:, 1], data_c[:, 1]+std_c[:, 1], alpha=.2)
+ax.fill_between(ANGLES, data_c[:, 1]-c95[:, 1], data_c[:, 1]+c95[:, 1], alpha=.2)
 
 ax.plot(ANGLES, data_c[:, 2], marker='s', label='ViT')
-ax.fill_between(ANGLES, data_c[:, 2]-std_c[:, 2], data_c[:, 2]+std_c[:, 2], alpha=.2)
+ax.fill_between(ANGLES, data_c[:, 2]-c95[:, 2], data_c[:, 2]+c95[:, 2], alpha=.2)
 ax.set_xticks(ANGLES)
 ax.set_xticklabels(ANGLES)
 ax.set_xlabel(r'$N$')
@@ -88,7 +89,7 @@ ax.set_ylabel('Test (out) error')
 ax.set_ylim((0, 1))
 ax.legend()
 plt.tight_layout()
-plt.savefig(out_dir / 'panelC.pdf')
+# plt.savefig(out_dir / 'panelC.pdf')
 plt.show()
 # %%
 mlp_errs = data[:, -1, 0, -1]
