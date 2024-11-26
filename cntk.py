@@ -2,10 +2,8 @@
 import numpy as np
 import jax
 from jax import numpy as jnp, random as jr
-from jaxtyping import Array, Float, Scalar, PyTree, Int, PRNGKeyArray, UInt8
-import equinox as eqx
-import optax
-from typing import Tuple, List
+from jaxtyping import Array, Float, PyTree, PRNGKeyArray
+from typing import Tuple
 import einops as ein
 import neural_tangents as nt
 from tqdm import tqdm
@@ -13,7 +11,7 @@ import functools as ft
 from pathlib import Path
 
 from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, xshift_img, kronmap
+from data_utils import three_shear_rotate, kronmap
 from gp_utils import make_circulant, circulant_error, extract_components, kreg
 Ensemble = PyTree
 

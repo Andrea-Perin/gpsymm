@@ -3,8 +3,7 @@ import numpy as np
 from scipy.interpolate import griddata
 import jax
 from jax import numpy as jnp, random as jr
-from jaxtyping import Array, Float, Scalar, PyTree, Int, PRNGKeyArray, UInt8
-from typing import Tuple
+from jaxtyping import Array, Float, PRNGKeyArray
 import einops as ein
 import neural_tangents as nt
 from tqdm import tqdm
@@ -12,9 +11,9 @@ import functools as ft
 from pathlib import Path
 
 from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, xshift_img, kronmap
+from data_utils import three_shear_rotate, kronmap
 from gp_utils import kreg, circulant_error, make_circulant, extract_components
-from plot_utils import cm, cloudplot, add_spines
+from plot_utils import cm, cloudplot, add_spines, semaphore
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -22,13 +21,13 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes, InsetPosition
 from mpl_toolkits.axes_grid1 import ImageGrid
 from matplotlib.patheffects import withStroke
 plt.style.use('myplots.mlpstyle')
-plt.set_cmap('viridis')
 
 
 # %% Parameters
 SEED = 124
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = [4, 8, 16, 32, 64]
+rot_idx = 1
 N_PAIRS = 5_000
 REG = 1e-5
 N_PCS = 3
@@ -48,8 +47,8 @@ W_std, b_std = 1., 1.
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
-    nt.stax.Relu(),
+    # nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    # nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
@@ -107,7 +106,7 @@ ax.set_yticks([])
 ax.set_zticks([])
 fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 plt.tight_layout(pad=0)
-# plt.savefig(out_path / 'panelA_8angles.pdf', bbox_inches='tight') #, pad_inches=0)
+plt.savefig(out_path / f'panelA_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight') #, pad_inches=0)
 plt.show()
 
 
@@ -234,74 +233,7 @@ deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lam
 # We are still unsure of the reason for this behavior
 lambda_last *= jnp.sqrt(jnp.array(N_ROTATIONS)[:, None])
 
-# %% PANEL B
-fig = plt.figure(figsize=(12*cm, 5*cm))
-grid = ImageGrid(
-    fig, 111, nrows_ncols=(1, 2), axes_pad=0.05, label_mode="L", share_all=True, aspect=False,
-    cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.05)
-# Empirical errors
-jittered_n = ein.repeat(jnp.array(N_ROTATIONS), 'n -> n p', p=N_PAIRS)
-jittered_n += jr.normal(key=RNG, shape=jittered_n.shape) * .5
-scatter1 = grid[0].scatter(jittered_n, empirical_errors, s=1, alpha=.1, c=jnp.log(deltasq))
-grid[0].set_xticks(N_ROTATIONS)
-grid[0].set_title("Empirical error", fontsize=10)
-grid[0].set_xlabel("$N_{rot}$",)
-grid[0].set_ylabel("Error magnitude")
-# Spectral errors
-scatter2 = grid[1].scatter(jittered_n, spectral_errors, s=1, alpha=.1, c=jnp.log(deltasq))
-grid[1].set_xticks(N_ROTATIONS)
-grid[1].set_xlabel("$N_{rot}$",)
-grid[1].set_title("Spectral error", fontsize=10)
-# Shared xlabel
-# Add colorbar
-cbar = grid.cbar_axes[0].colorbar(
-    plt.cm.ScalarMappable(norm=scatter2.norm, cmap=scatter2.get_cmap()),
-    alpha=1.0
-)
-cbar.set_label('$\log\Delta^2$')
-plt.set_cmap('viridis')
-plt.tight_layout()
-# plt.savefig(out_path / 'panelB_v1.pdf')
-plt.show()
-
 # %% PANEL C
-fig = cloudplot(
-    empirical_errors,
-    spectral_errors,
-    jnp.log(deltasq),
-    xlabel='Empirical error',
-    ylabel='Spectral error',
-    clabel="$\log\Delta^2$",
-    titles=[f"$N_{{rots}}={{{n}}}$" for n in N_ROTATIONS],
-    figsize=(17*cm, 5*cm)
-)
-cmax = max(empirical_errors.max(), spectral_errors.max())
-for ax in fig.get_axes()[:len(N_ROTATIONS)]:
-    ax.plot([0, cmax], [0, cmax], color='black', alpha=1, lw=.75, ls='--')
-fig.supxlabel('Empirical error', y=.12, fontsize=10)
-fig.supylabel('Spectral error', x=.05, y=0.59, fontsize=10)
-plt.tight_layout()
-# plt.savefig(out_path / 'panelC_v1.pdf')
-plt.show()
-
-# %% PANEL D
-fig = cloudplot(
-    deltasq,
-    (1/lambda_last),
-    jnp.log(spectral_errors),
-    xlabel=(XLAB:='$\Delta^2$'),
-    ylabel=(YLAB:='$\lambda_N$'),
-    clabel=r"log(spectral err.)",
-    titles=[f"$N_{{rots}}={{{n}}}$" for n in N_ROTATIONS],
-    figsize=(17*cm, 5*cm)
-)
-fig.supxlabel(XLAB, y=.15)
-fig.supylabel(YLAB, x=0.03, y=.55)
-plt.tight_layout()
-# plt.savefig(out_path / 'panelD_v1.pdf')
-plt.show()
-
-# %% PANEL E
 rot_idx = 1
 ll = lambda_last[rot_idx]
 lnl = lambda_avg[rot_idx]
@@ -373,29 +305,23 @@ cbar.set_label('Error magnitude')
 # plt.subplots_adjust(left=0.15, right=0.85, bottom=0.2, top=0.85)
 plt.subplots_adjust(top=1, bottom=0, wspace=0, hspace=0)
 plt.tight_layout(pad=0)
-# plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0)
+plt.savefig(out_path / f'panelC_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0)
 plt.show()
 
 # %% PANEL B: v2
-basecmap = plt.get_cmap('RdYlGn')
-colors = [basecmap(i) for i in range(basecmap.N)]
-semaphore = mpl.colors.LinearSegmentedColormap.from_list( 'Semaphore', colors, basecmap.N )
-bounds = jnp.linspace(0, 3, 4)
-norm = mpl.colors.BoundaryNorm(bounds, semaphore.N)
-
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
 grid = ImageGrid(
     fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
     cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
 grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
-grid[0].set_xlabel("Empirical error")
+grid[0].set_xlabel("Empirical error (NTK)")
 grid[0].set_ylabel("Spectral error")
 im = grid[0].scatter(
     empirical_errors[rot_idx],
     spectral_errors[rot_idx],
     c=emp_counts[rot_idx],
     marker='.', alpha=.1, s=2,
-    cmap=semaphore, norm=norm
+    cmap=semaphore
 )
 cbar = grid.cbar_axes[0].colorbar(
     plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()),
@@ -412,9 +338,9 @@ grid[0].set_xticks([0., 0.5, 1., 1.5])
 grid[0].set_xlim((0, None))
 grid[0].set_ylim((0, None))
 plt.tight_layout(pad=0.4)
-plt.savefig(out_path / f'panelB_semaphore_{N_ROTATIONS[rot_idx]}.pdf')
+plt.savefig(out_path / f'panelB_{N_ROTATIONS[rot_idx]}.pdf')
 plt.show()
-# %% PANEL C: v2
+# %% PANEL D
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
 grid = ImageGrid(
     fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
@@ -434,10 +360,10 @@ cbar = grid.cbar_axes[0].colorbar(
 cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
-# plt.savefig(out_path / f'panelC_{N_ROTATIONS[rot_idx]}.pdf')
+plt.savefig(out_path / f'panelD_{N_ROTATIONS[rot_idx]}.pdf')
 plt.show()
 
-# %% PANEL D: v2
+# %% PANEL E
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
 grid = ImageGrid(
     fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
@@ -448,8 +374,8 @@ grid[0].set_xlabel(r"$\langle\lambda^{-1}\rangle$")
 im = grid[0].scatter(
     # jnp.sqrt(lambda_avg[rot_idx]),
     lambda_avg[rot_idx],
-    # 1/proj_radius[rot_idx],
-    avg_angle[rot_idx],
+    # avg_angle[rot_idx],
+    1/proj_radius[rot_idx],
     c=jnp.log(spectral_errors[rot_idx]),
     marker='.', alpha=.1, s=2)
 cbar = grid.cbar_axes[0].colorbar(
@@ -458,26 +384,93 @@ cbar = grid.cbar_axes[0].colorbar(
 cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
-# plt.savefig(out_path / f'panelD_{N_ROTATIONS[rot_idx]}.pdf')
+plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf')
 plt.show()
-# %% PANEL D: v2
-fig = plt.figure(figsize=(6*cm, 5*cm))
-grid = ImageGrid(
-    fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
-    cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
-grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
-grid[0].set_xlabel(r"$1/\rho$")
-grid[0].set_ylabel(r"$\langle\lambda^{-1}\rangle$")
-im = grid[0].scatter(
-    (1/lambda_last)[rot_idx],
-    proj_radius[rot_idx],
-    c=jnp.log(spectral_errors[rot_idx]),
-    marker='.', alpha=.1, s=2)
-cbar = grid.cbar_axes[0].colorbar(
-    plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()), alpha=1.0
-)
-cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
-grid[0].yaxis.set_tick_params(rotation=90)
-plt.tight_layout(pad=0.4)
-# plt.savefig(out_path / 'panelD_v2.pdf')
-plt.show()
+# # %% PANEL D: v2
+# fig = plt.figure(figsize=(6*cm, 5*cm))
+# grid = ImageGrid(
+#     fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
+#     cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
+# grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
+# grid[0].set_xlabel(r"$1/\rho$")
+# grid[0].set_ylabel(r"$\langle\lambda^{-1}\rangle$")
+# im = grid[0].scatter(
+#     (1/lambda_last)[rot_idx],
+#     proj_radius[rot_idx],
+#     c=jnp.log(spectral_errors[rot_idx]),
+#     marker='.', alpha=.1, s=2)
+# cbar = grid.cbar_axes[0].colorbar(
+#     plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()), alpha=1.0
+# )
+# cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
+# grid[0].yaxis.set_tick_params(rotation=90)
+# plt.tight_layout(pad=0.4)
+# # plt.savefig(out_path / 'panelD_v2.pdf')
+# plt.show()
+
+# # %% PANEL B
+# fig = plt.figure(figsize=(12*cm, 5*cm))
+# grid = ImageGrid(
+#     fig, 111, nrows_ncols=(1, 2), axes_pad=0.05, label_mode="L", share_all=True, aspect=False,
+#     cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.05)
+# # Empirical errors
+# jittered_n = ein.repeat(jnp.array(N_ROTATIONS), 'n -> n p', p=N_PAIRS)
+# jittered_n += jr.normal(key=RNG, shape=jittered_n.shape) * .5
+# scatter1 = grid[0].scatter(jittered_n, empirical_errors, s=1, alpha=.1, c=jnp.log(deltasq))
+# grid[0].set_xticks(N_ROTATIONS)
+# grid[0].set_title("Empirical error", fontsize=10)
+# grid[0].set_xlabel("$N_{rot}$",)
+# grid[0].set_ylabel("Error magnitude")
+# # Spectral errors
+# scatter2 = grid[1].scatter(jittered_n, spectral_errors, s=1, alpha=.1, c=jnp.log(deltasq))
+# grid[1].set_xticks(N_ROTATIONS)
+# grid[1].set_xlabel("$N_{rot}$",)
+# grid[1].set_title("Spectral error", fontsize=10)
+# # Shared xlabel
+# # Add colorbar
+# cbar = grid.cbar_axes[0].colorbar(
+#     plt.cm.ScalarMappable(norm=scatter2.norm, cmap=scatter2.get_cmap()),
+#     alpha=1.0
+# )
+# cbar.set_label('$\log\Delta^2$')
+# plt.set_cmap('viridis')
+# plt.tight_layout()
+# # plt.savefig(out_path / 'panelB_v1.pdf')
+# plt.show()
+
+# # %% PANEL C
+# fig = cloudplot(
+#     empirical_errors,
+#     spectral_errors,
+#     jnp.log(deltasq),
+#     xlabel='Empirical error',
+#     ylabel='Spectral error',
+#     clabel="$\log\Delta^2$",
+#     titles=[f"$N_{{rots}}={{{n}}}$" for n in N_ROTATIONS],
+#     figsize=(17*cm, 5*cm)
+# )
+# cmax = max(empirical_errors.max(), spectral_errors.max())
+# for ax in fig.get_axes()[:len(N_ROTATIONS)]:
+#     ax.plot([0, cmax], [0, cmax], color='black', alpha=1, lw=.75, ls='--')
+# fig.supxlabel('Empirical error', y=.12, fontsize=10)
+# fig.supylabel('Spectral error', x=.05, y=0.59, fontsize=10)
+# plt.tight_layout()
+# # plt.savefig(out_path / 'panelC_v1.pdf')
+# plt.show()
+
+# # %% PANEL D
+# fig = cloudplot(
+#     deltasq,
+#     (1/lambda_last),
+#     jnp.log(spectral_errors),
+#     xlabel=(XLAB:='$\Delta^2$'),
+#     ylabel=(YLAB:='$\lambda_N$'),
+#     clabel=r"log(spectral err.)",
+#     titles=[f"$N_{{rots}}={{{n}}}$" for n in N_ROTATIONS],
+#     figsize=(17*cm, 5*cm)
+# )
+# fig.supxlabel(XLAB, y=.15)
+# fig.supylabel(YLAB, x=0.03, y=.55)
+# plt.tight_layout()
+# # plt.savefig(out_path / 'panelD_v1.pdf')
+# plt.show()

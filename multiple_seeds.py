@@ -31,7 +31,7 @@ TEMP = 0.
 RNG = jr.PRNGKey(SEED)
 ANGLES = [4, 8, 16, 32, 64]
 NUM_SEEDS = 13
-N_TESTS = 512
+N_TESTS = 10
 REG = 1e-4
 N_IMGS = 60_000
 N_CLASSES = 10
@@ -51,8 +51,8 @@ W_std, b_std = 1., 1.
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
-    nt.stax.Relu(),
+    # nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    # nt.stax.Relu(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
