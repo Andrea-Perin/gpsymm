@@ -21,7 +21,7 @@ Ensemble = PyTree
 SEED = 124
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 1
+N_PAIRS = 512
 N_IMGS = 60_000
 N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
 REG = 1e-5
@@ -48,7 +48,7 @@ init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Flatten(),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
-# kernel_fn = jax.jit(kernel_fn)
+kernel_fn = nt.batch(kernel_fn, device_count=-1, batch_size=1)
 
 
 def init_params(key: PRNGKeyArray, in_shape: Tuple[int]) -> Tuple[PRNGKeyArray, PyTree]:
@@ -121,9 +121,10 @@ for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROT
     data = get_data(key, n_rot)
     deltasq = get_deltasq(data)
     proj_radius = get_projected_radius(data)
-    resizer = ft.partial(jax.image.resize, shape=(14, 14, 1), method='nearest')
-    resized_data = jax.vmap(jax.vmap(resizer))(data)
-    kernels = jax.vmap(kernel_fn)(resized_data, resized_data).ntk
+    # resizer = ft.partial(jax.image.resize, shape=(14, 14, 1), method='nearest')
+    # resized_data = jax.vmap(jax.vmap(resizer))(data)
+    # kernels = jax.vmap(kernel_fn)(resized_data, resized_data).ntk
+    kernels = jnp.stack([kernel_fn(orb, orb).ntk for orb in data])
     # computation of empirical errors, done as average over both classes
     ys = jnp.array([+1., -1.]*n_rot)[:, None]
     empirical_results = jax.vmap(get_symm_empirical_error, in_axes=(0, None))(kernels, ys)
@@ -142,3 +143,5 @@ for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROT
     lambda_avg = ein.reduce(isp, 'n d -> n', 'mean')
     # loading of results
     results[:, idx] = deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lambda_avg, proj_radius, avg_angle, empirical_correct_preds
+
+np.save(out_path / 'results', results)
