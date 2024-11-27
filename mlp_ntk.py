@@ -10,14 +10,12 @@ from tqdm import tqdm
 import functools as ft
 from pathlib import Path
 
-from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, kronmap
-from gp_utils import kreg, circulant_error, make_circulant, extract_components
-from plot_utils import cm, cloudplot, add_spines, semaphore
+from utils.mnist_utils import load_images, load_labels, normalize_mnist
+from utils.data_utils import three_shear_rotate, kronmap
+from utils.gp_utils import kreg, circulant_error, make_circulant, extract_components
+from utils.plot_utils import cm, add_spines, semaphore
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, InsetPosition
 from mpl_toolkits.axes_grid1 import ImageGrid
 from matplotlib.patheffects import withStroke
 plt.style.use('myplots.mlpstyle')
@@ -31,7 +29,8 @@ rot_idx = 1
 N_PAIRS = 5_000
 REG = 1e-5
 N_PCS = 3
-out_path = Path('images/highd')
+n_hidden_layers = 5
+out_path = Path(f'images/mlp_{n_hidden_layers}')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -44,11 +43,12 @@ make_orbit = kronmap(three_shear_rotate, 2)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 # network and NTK
 W_std, b_std = 1., 1.
-init_fn, apply_fn, kernel_fn = nt.stax.serial(
+layer = nt.stax.serial(
     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-    # nt.stax.Dense(512, W_std=W_std, b_std=b_std),
-    # nt.stax.Relu(),
+)
+init_fn, apply_fn, kernel_fn = nt.stax.serial(
+    nt.stax.serial(*([layer] * n_hidden_layers)),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
@@ -107,7 +107,7 @@ ax.set_zticks([])
 fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 plt.tight_layout(pad=0)
 plt.savefig(out_path / f'panelA_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight') #, pad_inches=0)
-plt.show()
+# plt.show()
 
 
 # %% EVERYTHING ELSE
@@ -306,7 +306,7 @@ cbar.set_label('Error magnitude')
 plt.subplots_adjust(top=1, bottom=0, wspace=0, hspace=0)
 plt.tight_layout(pad=0)
 plt.savefig(out_path / f'panelC_{N_ROTATIONS[rot_idx]}.pdf', bbox_inches='tight', pad_inches=0)
-plt.show()
+# plt.show()
 
 # %% PANEL B: v2
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
@@ -339,7 +339,7 @@ grid[0].set_xlim((0, None))
 grid[0].set_ylim((0, None))
 plt.tight_layout(pad=0.4)
 plt.savefig(out_path / f'panelB_{N_ROTATIONS[rot_idx]}.pdf')
-plt.show()
+# plt.show()
 # %% PANEL D
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
 grid = ImageGrid(
@@ -361,7 +361,7 @@ cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
 plt.savefig(out_path / f'panelD_{N_ROTATIONS[rot_idx]}.pdf')
-plt.show()
+# plt.show()
 
 # %% PANEL E
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
@@ -385,7 +385,7 @@ cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
 plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf')
-plt.show()
+# plt.show()
 # # %% PANEL D: v2
 # fig = plt.figure(figsize=(6*cm, 5*cm))
 # grid = ImageGrid(
