@@ -11,7 +11,7 @@ import functools as ft
 from pathlib import Path
 
 from utils.mnist_utils import load_images, load_labels, normalize_mnist
-from utils.data_utils import three_shear_rotate, kronmap
+from utils.data_utils import make_rotation_orbit
 from utils.gp_utils import kreg, circulant_error, make_circulant, extract_components
 from utils.plot_utils import cm, add_spines, semaphore
 
@@ -24,12 +24,12 @@ plt.style.use('myplots.mlpstyle')
 # %% Parameters
 SEED = 124
 RNG = jr.PRNGKey(SEED)
-N_ROTATIONS = [4, 8, 16, 32, 64]
+N_ROTATIONS = [2, 4, 8, 16, 32, 64]
 rot_idx = 1
-N_PAIRS = 5_000
-REG = 1e-5
+N_PAIRS = 500
+REG = 1e-4
 N_PCS = 3
-n_hidden_layers = 5
+n_hidden_layers = 1
 out_path = Path(f'images/mlp_{n_hidden_layers}')
 out_path.mkdir(parents=True, exist_ok=True)
 
@@ -37,9 +37,9 @@ out_path.mkdir(parents=True, exist_ok=True)
 
 img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
 lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
-images = normalize_mnist(load_images(img_path=img_path))
+images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
-make_orbit = kronmap(three_shear_rotate, 2)
+# make_orbit = kronmap(three_shear_rotate, 2)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 # network and NTK
 W_std, b_std = 1., 1.
@@ -57,12 +57,14 @@ kernel_fn = jax.jit(kernel_fn)
 # %% PANEL A to start
 label_a, label_b = 4, 7
 digit_selector = 10
-angles = jnp.linspace(0, 1, angles_panel_a:=360, endpoint=False) * jnp.pi * 2
+angles = jnp.linspace(0, 360, angles_panel_a:=360, endpoint=False)
 digit_a = images[labels == label_a][digit_selector:digit_selector+1]
 digit_b = images[labels == label_b][:1]
-digit_a_orbits = make_orbit(digit_a, angles)
-digit_b_orbits = make_orbit(digit_b, angles)
-data, ps = ein.pack( (digit_a_orbits[0], digit_b_orbits[0]), '* n w h' )
+digit_a_orbits = make_rotation_orbit(digit_a, angles)
+digit_b_orbits = make_rotation_orbit(digit_b, angles)
+digit_a_orbits = normalize_mnist(digit_a_orbits[0])
+digit_b_orbits = normalize_mnist(digit_b_orbits[0])
+data, ps = ein.pack( (digit_a_orbits, digit_b_orbits), '* n w h' )
 data = ein.rearrange(data, 'd n w h -> (n d) (w h)')
 u, s, vh = jnp.linalg.svd(data,  full_matrices=True)
 pcs = ein.einsum(u[:, :N_PCS], s[:N_PCS], 'i j, j -> i j')
@@ -70,9 +72,9 @@ pcs = ein.einsum(u[:, :N_PCS], s[:N_PCS], 'i j, j -> i j')
 fig = plt.figure(figsize=(5.75*cm, 5*cm))
 ax = fig.add_subplot(111, projection='3d')
 ax.set_position((0, 0, 1, 1))
-step = 360//8
-looped_a, ps = ein.pack((pcs[::2*step], pcs[:1]), '* d')
-looped_b, ps = ein.pack((pcs[1::2*step], pcs[1:2]), '* d')
+step = 360//(N_ROTATIONS[rot_idx])
+looped_a, ps = ein.pack((pcs[::N_ROTATIONS[rot_idx]*2], pcs[:1]), '* d')
+looped_b, ps = ein.pack((pcs[1::N_ROTATIONS[rot_idx]*2], pcs[1:2]), '* d')
 ax.plot(looped_a[:, 0], looped_b[:, 1], looped_a[:, 2], 'o--', lw=.3, markersize=1.5, label=label_a)
 ax.plot(looped_b[:, 0], looped_b[:, 1], looped_b[:, 2], 'o--', lw=.3, markersize=1.5, label=label_b)
 # show PCA basis elements
@@ -127,10 +129,15 @@ def get_data(
     idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
     #
     images_A, images_B = images[idxs_A], images[idxs_B]
-    orbits_A = make_orbit(images_A, angles)
-    orbits_B = make_orbit(images_B, angles + jnp.pi/n_rotations)
+    orbits_A = make_rotation_orbit(images_A, angles)
+    orbits_B = make_rotation_orbit(images_B, angles)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * angle width height')
-    return ein.rearrange(data, 'pair digit angle width height -> pair (angle digit) (width height)')
+    data = normalize_mnist(ein.rearrange(data, 'pair digit angle width height -> (pair digit angle) width height'))
+    return ein.rearrange(
+        data,
+        '(pair digit angle) width height -> pair (angle digit) (width height)',
+        pair=n_pairs, digit=2, angle=n_rotations
+    )
 
 
 @jax.jit
@@ -220,7 +227,8 @@ for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROT
     avg_angle = ein.reduce(ckernels[:, 0, 2::2], 'n k -> n', 'mean')
     # computation of elements of the inverse spectrum. NOTE THE REGULARIZATION
     # CONSTANT: see https://numpy.org/doc/stable/reference/routines.fft.html#normalization
-    isp = 1/jnp.abs(jax.vmap(orthofft)(ckernels[:, 0]) + REG*jnp.sqrt(2*n_rot))
+    # isp = 1/jnp.abs(jax.vmap(orthofft)(ckernels[:, 0]) + REG*jnp.sqrt(2*n_rot))
+    isp = 1/jnp.abs(jax.vmap(jnp.fft.fft)(ckernels[:, 0]))
     lambda_last = isp[:, n_rot]
     lambda_avg_no_last = ein.reduce(jnp.delete(isp, n_rot, axis=1), 'n d -> n', 'mean')
     lambda_avg = ein.reduce(isp, 'n d -> n', 'mean')
@@ -234,7 +242,6 @@ deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lam
 lambda_last *= jnp.sqrt(jnp.array(N_ROTATIONS)[:, None])
 
 # %% PANEL C
-rot_idx = 1
 ll = lambda_last[rot_idx]
 lnl = lambda_avg[rot_idx]
 spec_errs = spectral_errors[rot_idx]
@@ -321,7 +328,7 @@ im = grid[0].scatter(
     spectral_errors[rot_idx],
     c=emp_counts[rot_idx],
     marker='.', alpha=.1, s=2,
-    cmap=semaphore
+    # cmap=semaphore
 )
 cbar = grid.cbar_axes[0].colorbar(
     plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()),
@@ -334,7 +341,7 @@ cbar.ax.set_yticklabels((0, 1, 2))
 
 cmax = max(empirical_errors[rot_idx].max(), spectral_errors[rot_idx].max())
 grid[0].plot([0, cmax], [0, cmax], color='black', alpha=1, lw=.75, ls='--')
-grid[0].set_xticks([0., 0.5, 1., 1.5])
+# grid[0].set_xticks([0., 0.5, 1., 1.5])
 grid[0].set_xlim((0, None))
 grid[0].set_ylim((0, None))
 plt.tight_layout(pad=0.4)
@@ -372,9 +379,7 @@ grid[0].set_title(f"$N_{{rot}}={{{N_ROTATIONS[rot_idx]}}}$", fontsize=10)
 grid[0].set_ylabel(r"$1/\rho$")
 grid[0].set_xlabel(r"$\langle\lambda^{-1}\rangle$")
 im = grid[0].scatter(
-    # jnp.sqrt(lambda_avg[rot_idx]),
     lambda_avg[rot_idx],
-    # avg_angle[rot_idx],
     1/proj_radius[rot_idx],
     c=jnp.log(spectral_errors[rot_idx]),
     marker='.', alpha=.1, s=2)
@@ -385,6 +390,21 @@ cbar.ax.set_title(r'$\log\varepsilon_s$', fontsize=10)
 grid[0].yaxis.set_tick_params(rotation=90)
 plt.tight_layout(pad=0.4)
 plt.savefig(out_path / f'panelE_{N_ROTATIONS[rot_idx]}.pdf')
+
+
+# %% Linear regression over spectral vs empirical
+ys = spectral_errors[rot_idx]
+xs = empirical_errors[rot_idx]
+common_mask = jnp.isnan(ys) | jnp.isnan(xs)
+ys = ys[~common_mask]
+xs = xs[~common_mask]
+alpha = ((ys.sum()) * (xs**2).sum() - xs.sum() * (xs*ys).sum()) / ((N_PAIRS * (xs**2).sum()) - (xs.sum())**2)
+beta = (N_PAIRS * (xs*ys).sum() - (xs.sum() * ys.sum())) / (N_PAIRS * (xs**2).sum() - (xs.sum())**2)
+print(alpha)
+print(beta)
+# %%
+
+# %%
 # plt.show()
 # # %% PANEL D: v2
 # fig = plt.figure(figsize=(6*cm, 5*cm))

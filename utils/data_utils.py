@@ -2,6 +2,20 @@
 from jax import numpy as jnp, random as jr, vmap
 from jaxtyping import Array, Float
 from typing import Callable
+import functools as ft
+import scipy
+import numpy as np
+
+
+scipy_rotate = ft.partial(scipy.ndimage.rotate, axes=(1, 2), reshape=False)
+
+
+def make_rotation_orbit(img: Float[Array, 'batch w h c'], angles: Float[Array, 'a']) -> Float[Array, 'batch a w h c']:
+    """Assumes angle in degrees"""
+    return jnp.stack(
+        [scipy_rotate(img, a) for a in angles],
+        axis=1
+    )
 
 
 def xshift_img(img: Float[Array, 'w h'], sfrac: float) -> Float[Array, 'w h']:
