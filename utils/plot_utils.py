@@ -39,7 +39,7 @@ def add_inner_title(ax, title, loc, **kwargs):
                 size=plt.rcParams['legend.fontsize'])
     at = AnchoredText(title, loc=loc, prop=prop,
                       pad=0., borderpad=0.5,
-                      frameon=True, **kwargs)
+                      frameon=False, **kwargs)
     ax.add_artist(at)
     return at
 
