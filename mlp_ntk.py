@@ -1,6 +1,5 @@
 # %% Investigations on circularizations of empirical cov
 import numpy as np
-from scipy.interpolate import griddata
 import jax
 from jax import numpy as jnp, random as jr
 from jaxtyping import Array, Float, PRNGKeyArray
@@ -9,18 +8,19 @@ import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
 from pathlib import Path
+import argparse
 
 from utils.conf import load_config
 from utils.mnist_utils import load_images, load_labels, normalize_mnist
 from utils.data_utils import make_rotation_orbit
 from utils.gp_utils import kreg, circulant_error, make_circulant, extract_components
-from utils.plot_utils import cm, add_spines, semaphore, add_inner_title
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import ImageGrid
-from matplotlib.patheffects import withStroke
-plt.style.use('myplots.mlpstyle')
 
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Run MLP NTK analysis')
+parser.add_argument('--n-hidden', type=int, default=1,
+                   help='number of hidden layers (default: 1)')
+args = parser.parse_args()
 
 # %% Parameters
 cfg = load_config('config.toml')
@@ -34,21 +34,16 @@ img_path = Path(cfg['paths']['img_path'])
 lab_path = Path(cfg['paths']['lab_path'])
 
 
-
-
 # %% File specific stuff
-rot_idx = 2
 REG = 1e-4
 W_std, b_std = 1., 1.
-n_hidden_layers = 1
+n_hidden_layers = 2
 res_path = Path(cfg['paths']['res_path']) / f'mlp_{n_hidden_layers}'
 res_path.mkdir(parents=True, exist_ok=True)
 out_path = Path(f'images/mlp_{n_hidden_layers}')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
-img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
-lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
 images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
 # make_orbit = kronmap(three_shear_rotate, 2)
