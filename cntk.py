@@ -9,17 +9,20 @@ import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
 from pathlib import Path
+import scipy
 
-from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, kronmap
-from gp_utils import make_circulant, circulant_error, extract_components, kreg
+from utils.mnist_utils import load_images, load_labels, normalize_mnist
+from utils.data_utils import make_rotation_orbit
+from utils.gp_utils import make_circulant, circulant_error, extract_components, kreg
 Ensemble = PyTree
+
+import matplotlib.pyplot as plt
 
 # %% Parameters
 SEED = 124
 RNG = jr.PRNGKey(SEED)
-N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 512
+N_ROTATIONS = [2, 4, 8, 16, 32, 64]
+N_PAIRS = 100
 N_IMGS = 60_000
 N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
 REG = 1e-5
@@ -32,19 +35,17 @@ b_std = 1.
 # %%
 img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
 lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
-images = normalize_mnist(load_images(img_path=img_path))
+images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
-make_orbit = kronmap(three_shear_rotate, 2)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 in_shape = (1, *images[0].shape, 1)
-assert in_shape == (1, 28, 28, 1)
 # network and NTK
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Conv(out_chan=64, filter_shape=(3, 3), padding='CIRCULAR', W_std=W_std, b_std=None),
     nt.stax.Relu(),
-    nt.stax.GlobalAvgPool(),
+    # nt.stax.GlobalAvgPool(),
     nt.stax.Flatten(),
-    nt.stax.Dense(1, W_std=W_std, b_std=b_std)
+    nt.stax.Dense(1, W_std=W_std, b_std=None)
 )
 kernel_fn = nt.batch(kernel_fn, device_count=-1, batch_size=1)
 
@@ -61,11 +62,11 @@ def get_data(
     key: PRNGKeyArray,
     n_rotations: int,
     n_pairs: int = N_PAIRS,
-    collision_rate: float = .2,
+    collision_rate: float = 20/N_PAIRS,
 ) -> Float[Array, 'pair (angle digit) width height 1']:
     n_pairs_actual = int(n_pairs * (1+collision_rate))
     key_a, key_b = jr.split(key)
-    angles = jnp.linspace(0, 2*jnp.pi, n_rotations, endpoint=False)
+    angles = jnp.linspace(0, 360, n_rotations, endpoint=False)
     idxs_A, idxs_B = jr.randint(key, minval=0, maxval=len(images), shape=(2, n_pairs_actual,))
     # remove same-digit pairs
     labels_A, labels_B = labels[idxs_A], labels[idxs_B]
@@ -73,10 +74,18 @@ def get_data(
     idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
     #
     images_A, images_B = images[idxs_A], images[idxs_B]
-    orbits_A = make_orbit(images_A, angles)
-    orbits_B = make_orbit(images_B, angles + jnp.pi/n_rotations)
+    ## weird thing
+    images_A = images_A.at[0].set(images_B[0])
+    ##
+    orbits_A = make_rotation_orbit(images_A, angles)
+    orbits_B = make_rotation_orbit(images_B, angles)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * angle width height')
-    return ein.rearrange(data, 'pair digit angle width height -> pair (angle digit) width height 1')
+    data = normalize_mnist(ein.rearrange(data, 'p d a w h -> (p d a) w h'))
+    return ein.rearrange(
+        data,
+        '(pair digit angle) width height -> pair (angle digit) width height 1',
+        digit=2, angle=n_rotations, pair=len(orbits_A)
+    )
 
 
 @jax.jit
@@ -119,9 +128,6 @@ for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROT
     data = get_data(key, n_rot)
     deltasq = get_deltasq(data)
     proj_radius = get_projected_radius(data)
-    # resizer = ft.partial(jax.image.resize, shape=(14, 14, 1), method='nearest')
-    # resized_data = jax.vmap(jax.vmap(resizer))(data)
-    # kernels = jax.vmap(kernel_fn)(resized_data, resized_data).ntk
     kernels = jnp.stack([kernel_fn(orb, orb).ntk for orb in data])
     # computation of empirical errors, done as average over both classes
     ys = jnp.array([+1., -1.]*n_rot)[:, None]
