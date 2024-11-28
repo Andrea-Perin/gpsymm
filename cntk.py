@@ -9,32 +9,30 @@ import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
 from pathlib import Path
-import scipy
 
+from utils.conf import load_config
 from utils.mnist_utils import load_images, load_labels, normalize_mnist
 from utils.data_utils import make_rotation_orbit
 from utils.gp_utils import make_circulant, circulant_error, extract_components, kreg
-Ensemble = PyTree
-
-import matplotlib.pyplot as plt
 
 # %% Parameters
-SEED = 124
+cfg = load_config('params.toml')
+SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
-N_ROTATIONS = [2, 4, 8, 16, 32, 64]
-N_PAIRS = 100
-N_IMGS = 60_000
-N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
-REG = 1e-5
-out_path = Path('results/cntk')
-out_path.mkdir(parents=True, exist_ok=True)
+N_ROTATIONS = cfg['params']['rotations']
+N_PAIRS = cfg['params']['n_pairs']
 
+# %% Paths
+img_path = Path(cfg['paths']['img_path'])
+lab_path = Path(cfg['paths']['lab_path'])
+res_path = Path(cfg['paths']['res_path']) / 'cntk'
+res_path.mkdir(parents=True, exist_ok=True)
+
+REG = 1e-5
 W_std = 1.
 b_std = 1.
 
 # %%
-img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
-lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
 images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
@@ -62,7 +60,7 @@ def get_data(
     key: PRNGKeyArray,
     n_rotations: int,
     n_pairs: int = N_PAIRS,
-    collision_rate: float = 20/N_PAIRS,
+    collision_rate: float = .2+20/N_PAIRS,
 ) -> Float[Array, 'pair (angle digit) width height 1']:
     n_pairs_actual = int(n_pairs * (1+collision_rate))
     key_a, key_b = jr.split(key)
@@ -74,9 +72,6 @@ def get_data(
     idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
     #
     images_A, images_B = images[idxs_A], images[idxs_B]
-    ## weird thing
-    images_A = images_A.at[0].set(images_B[0])
-    ##
     orbits_A = make_rotation_orbit(images_A, angles)
     orbits_B = make_rotation_orbit(images_B, angles)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * angle width height')
@@ -148,4 +143,4 @@ for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROT
     # loading of results
     results[:, idx] = deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lambda_avg, proj_radius, avg_angle, empirical_correct_preds
 
-np.save(out_path / 'results', results)
+np.save(res_path / 'results', results)

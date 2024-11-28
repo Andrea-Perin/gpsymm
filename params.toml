@@ -1,0 +1,11 @@
+[params]
+seed= 124
+rotations= [2, 4, 8, 16, 32, 64]
+n_pairs= 512
+n_imgs= 60000
+
+[paths]
+img_path = "./data/MNIST/raw/train-images-idx3-ubyte.gz"
+lab_path = "./data/MNIST/raw/train-labels-idx1-ubyte.gz"
+res_path = "./results"
+out_path = "./images"
