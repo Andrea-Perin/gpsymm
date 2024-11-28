@@ -22,6 +22,7 @@ from einops.layers.torch import Rearrange, Reduce
 
 from vit_pytorch import SimpleViT
 
+
 # some meta params
 def set_seed_and_generator(seed=0):
     """Make results deterministic. If seed == -1, do not make deterministic.
@@ -42,14 +43,14 @@ generator = set_seed_and_generator(125)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.cuda.empty_cache()
 
-results_dir = Path('./results')
-results_dir.mkdir(parents=True, exist_ok=True)
-n_epochs = 21
 
-# if full experiment is needed
-batch_size = 512*4
+# %% Params
+n_epochs = 22
 n_angles = [2, 4, 8, 16, 32, 64]
+res_dir = Path('results') / 'fig1_data'
+res_dir.mkdir(parents=True, exist_ok=True)
 
+batch_size = 512*4
 
 # %% Weird dataset thing
 transform = Compose([ToImage(), ToDtype(torch.float32, scale=True)])
@@ -260,4 +261,4 @@ results, _ = ein.pack(
     (train_losses, train_acc, test_acc_in, test_acc_out),
     'd m e *'
 )
-np.save( results_dir / 'fig_1_data', results )
+np.save( res_dir / 'results', results )

@@ -5,6 +5,8 @@ from .mnist_utils import load_images, load_labels, normalize_mnist
 from .plot_utils import cm, semaphore, add_spines
 
 __all__ = [
+    'load_config',
+
     'make_circulant',
     'extract_components',
     'kreg',

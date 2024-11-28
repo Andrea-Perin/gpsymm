@@ -9,14 +9,23 @@ import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
 from pathlib import Path
+import argparse
 
 from utils.conf import load_config
 from utils.mnist_utils import load_images, load_labels, normalize_mnist
 from utils.data_utils import make_rotation_orbit
 from utils.gp_utils import make_circulant, circulant_error, extract_components, kreg
 
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Run CNN NTK analysis')
+parser.add_argument('--gap', action='store_true',
+                    help='whether to use Global Average Pooling layer (default: False)')
+args = parser.parse_args()
+
+
 # %% Parameters
-cfg = load_config('params.toml')
+cfg = load_config('config.toml')
 SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = cfg['params']['rotations']
@@ -25,12 +34,16 @@ N_PAIRS = cfg['params']['n_pairs']
 # %% Paths
 img_path = Path(cfg['paths']['img_path'])
 lab_path = Path(cfg['paths']['lab_path'])
-res_path = Path(cfg['paths']['res_path']) / 'cntk'
-res_path.mkdir(parents=True, exist_ok=True)
+res_path = Path(cfg['paths']['res_path'])
 
+# %% File-specific stuff
+IS_FC = args.gap
 REG = 1e-5
 W_std = 1.
 b_std = 1.
+res_path = res_path / ('cntk_' + ('fc' if IS_FC else 'gap'))
+res_path.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 images = load_images(img_path=img_path)
@@ -38,10 +51,14 @@ labels = load_labels(lab_path=lab_path)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 in_shape = (1, *images[0].shape, 1)
 # network and NTK
-init_fn, apply_fn, kernel_fn = nt.stax.serial(
+conv =  nt.stax.serial(
     nt.stax.Conv(out_chan=64, filter_shape=(3, 3), padding='CIRCULAR', W_std=W_std, b_std=None),
-    nt.stax.Relu(),
-    # nt.stax.GlobalAvgPool(),
+    nt.stax.Relu()
+)
+pool = nt.stax.Identity() if IS_FC else nt.stax.GlobalAvgPool()
+init_fn, apply_fn, kernel_fn = nt.stax.serial(
+    conv,
+    pool,
     nt.stax.Flatten(),
     nt.stax.Dense(1, W_std=W_std, b_std=None)
 )

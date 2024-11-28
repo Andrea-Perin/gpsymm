@@ -1,21 +1,26 @@
 # %% This does the same thing as the other one, but with easier data loading
 from pathlib import Path
-import jax
 from jax import numpy as jnp
 import einops as ein
 
-from plot_utils import cm, add_inner_title
-import matplotlib as mpl
+from utils.conf import load_config
+from utils.plot_utils import cm, add_inner_title
 import matplotlib.pyplot as plt
 plt.style.use('myplots.mlpstyle')
-N_EPOCHS = 22
-ANGLES = [2, 4, 8, 16, 32, 64]
-results_dir = Path('./results')
-out_dir = Path('./images/fig1')
+
+
+# %% Load params and paths
+cfg = load_config('config.toml')
+N_EPOCHS = cfg['params']['n_epochs']
+ANGLES = cfg['params']['rotations']  # [2, 4, 8, 16, 32, 64]
+img_path = Path(cfg['paths']['img_path'])
+res_path = Path(cfg['paths']['res_path'])
+out_dir = img_path / 'fig1'
 out_dir.mkdir(parents=True, exist_ok=True)
 
+
 # %% Load and reshape properly
-data = jnp.load(results_dir / 'results_all_epochs.npy')
+data = jnp.load(res_path / 'results_all_epochs.npy')
 avg_data = ein.reduce(data, 'digit ... -> ...', 'mean')
 std_data = ein.reduce(data, 'digit ... -> ...', jnp.std)
 print(f'Shape should be: (num_angles, num_models, num_values, num_epochs): {avg_data.shape}')
