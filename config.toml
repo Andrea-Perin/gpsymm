@@ -3,9 +3,11 @@ seed = 124
 rotations = [2, 4, 8, 16, 32, 64]
 n_pairs = 512
 n_imgs = 60000
-n_epochs = 22
 n_seeds = 13
 n_pts_multiple_seeds = 50
+n_cls_per_test_multiclass = 10
+n_epochs = 2000
+batch_size = 512
 
 [paths]
 img_path = "./data/MNIST/raw/train-images-idx3-ubyte.gz"
