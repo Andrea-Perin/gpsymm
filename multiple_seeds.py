@@ -1,62 +1,59 @@
 # %% multiple seeds
 import numpy as np
-from numpy.ma.core import angle
-from scipy.interpolate import griddata
 import jax
 from jax import numpy as jnp, random as jr
-from jaxtyping import Array, Float, Integer, Scalar, PyTree, Int, PRNGKeyArray, UInt8
-from typing import Tuple
 import einops as ein
 import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
 from pathlib import Path
+import argparse
 
-from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, xshift_img, kronmap
-from gp_utils import kreg, circulant_error, make_circulant, extract_components
-from plot_utils import cm, cloudplot, add_spines, semaphore
+from utils.conf import load_config
+from utils.mnist_utils import load_images, load_labels, normalize_mnist
+from utils.data_utils import kronmap, make_rotation_orbit
+from utils.gp_utils import circulant_error, make_circulant
+from utils.plot_utils import cm
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, InsetPosition
 from mpl_toolkits.axes_grid1 import ImageGrid
-from matplotlib.patheffects import withStroke
 plt.style.use('myplots.mlpstyle')
 
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Run MLP NTK analysis with multiple seeds')
+parser.add_argument('--n-hidden', type=int, default=1,
+                   help='number of hidden layers (default: 1)')
+args = parser.parse_args()
 
 # %% Parameters
-SEED = 124
-TEMP = 0.
+cfg = load_config('config.toml')
+SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
-ANGLES = [4, 8, 16, 32, 64]
-NUM_SEEDS = 13
-N_TESTS = 10
-REG = 1e-4
-N_IMGS = 60_000
-N_CLASSES = 10
-out_path = Path('images/highd')
+ANGLES = cfg['params']['rotations']  # [2, 4, 8, 16, 32, 64]
+NUM_SEEDS = cfg['params']['n_seeds']
+N_TESTS = cfg['params']['n_pts_multiple_seeds']
+
+# %% Paths
+out_path = Path(cfg['paths']['out_path']) / f'multiple_seeds_{args.n_hidden}'
 out_path.mkdir(parents=True, exist_ok=True)
+img_path = Path(cfg['paths']['img_path'])
+lab_path = Path(cfg['paths']['lab_path'])
 
+# %% Other params
+# TEMP = 0.  # for softmax purposes, not used
+REG = 1e-4
+N_CLASSES = 10  # Instead of having a magic number 10 around the codebase
 
-img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
-lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
-images = normalize_mnist(load_images(img_path=img_path))
-labels = load_labels(lab_path=lab_path)
-make_orbit = kronmap(three_shear_rotate, 2)
-orthofft = ft.partial(jnp.fft.fft, norm='ortho')
-find_min_idx = ft.partial(jnp.argmin, axis=1)
-# network and NTK
 W_std, b_std = 1., 1.
-init_fn, apply_fn, kernel_fn = nt.stax.serial(
+layer = nt.stax.serial(
     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-    # nt.stax.Dense(512, W_std=W_std, b_std=b_std),
-    # nt.stax.Relu(),
+)
+init_fn, apply_fn, kernel_fn = nt.stax.serial(
+    nt.stax.serial(*([layer] * args.n_hidden)),  # Use args.n_hidden here
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
-
 
 
 mycat = lambda x, y: jnp.concatenate((x, y), axis=0)
@@ -80,26 +77,32 @@ def regress(points, nangles):
     return mean
 
 
+images = load_images(img_path=img_path)
+labels = load_labels(lab_path=lab_path)
 results = np.empty((len(ANGLES), N_TESTS, 3))
 colors_pairings = np.empty((len(ANGLES), N_TESTS))
 colors_semaphore = np.empty((len(ANGLES), N_TESTS))
 for angle_idx, nangles in enumerate(ANGLES):
-    angles = jnp.linspace(0, 2*jnp.pi, nangles, endpoint=False)
+    angles = jnp.linspace(0, 360, nangles, endpoint=False)
     RNG, test_key = jr.split(RNG)
     test_keys = jr.split(test_key, N_TESTS)
     for test_idx, key in tqdm(zip(range(N_TESTS), test_keys)):
         # pick data
         key, kab, ka, kb = jr.split(key, num=4)
         class_a, class_b = jnp.sort(jr.choice(kab, N_CLASSES, replace=False, shape=(2,)))
-        colors_pairings[angle_idx, test_idx] = 10*class_a+class_b  # just a way to encode pairs as colors
+        colors_pairings[angle_idx, test_idx] = N_CLASSES*class_a+class_b  # just a way to encode pairs as colors
         idxs_a = jr.choice(ka, jnp.argwhere(labels == class_a), replace=False, shape=(NUM_SEEDS,))[:, 0]
         idxs_b = jr.choice(kb, jnp.argwhere(labels == class_b), replace=False, shape=(NUM_SEEDS,))[:, 0]
-        orbits_a = ein.rearrange(
-            make_orbit(images[idxs_a], angles),
-            'seed angle w h -> seed angle (w h)')
-        orbits_b = ein.rearrange(
-            make_orbit(images[idxs_b], angles),  # +jnp.pi/NUM_ANGLES),
-            'seed angle w h -> seed angle (w h)')
+
+        orbits_a = make_rotation_orbit(images[idxs_a], angles)
+        orbits_a = ein.rearrange(orbits_a, 'seed angle w h -> (seed angle) w h')
+        orbits_a = normalize_mnist(orbits_a)
+        orbits_a = ein.rearrange(orbits_a, '(seed angle) w h -> seed angle (w h)', seed=NUM_SEEDS, angle=nangles)
+
+        orbits_b = make_rotation_orbit(images[idxs_b], angles)
+        orbits_b = ein.rearrange(orbits_b, 'seed angle w h -> (seed angle) w h')
+        orbits_b = normalize_mnist(orbits_b)
+        orbits_b = ein.rearrange(orbits_b, '(seed angle) w h -> seed angle (w h)', seed=NUM_SEEDS, angle=nangles)
 
         # First with weird
         orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
@@ -123,20 +126,22 @@ for angle_idx, nangles in enumerate(ANGLES):
 
         results[angle_idx, test_idx] = (sp_err, err_a, err_b)
 
-
 # %%
-figsize = (16*cm, 6*cm)
+figsize = (17*cm, 5*cm)
 fig = plt.figure(figsize=figsize)
 grid = ImageGrid(fig, 111,
                 nrows_ncols=(1, len(ANGLES)),
-                axes_pad=0.15,
+                axes_pad=0.1,
                 share_all=True,
+                aspect=True,  # This forces square aspect ratio
                 cbar_location="right",
                 cbar_mode="single",
                 cbar_size="5%",
                 cbar_pad=0.15,
                 )
 
+assert (not jnp.any(jnp.isnan(results)))
+maxres = jnp.max(results)
 for angle_idx, ax in enumerate(grid):
     sc = ax.scatter(
         np.mean(results[angle_idx, :, 1:], axis=1),
@@ -147,27 +152,27 @@ for angle_idx, ax in enumerate(grid):
         vmax=1,
         s=2
     )
-    ax.set_title(f'$N_{{rot}}={{{ANGLES[angle_idx]}}}$', fontsize=10)
-    ax.plot([0, 1.5], [0, 1.5], ls='--', color='k', lw=.5)
-    ax.plot([0, 2], [1, 1], ls='--', color='k', lw=.5)
-    ax.plot([1, 1], [0, 2], ls='--', color='k', lw=.5)
+    ax.plot([0, maxres], [0, maxres], '--', c='k', lw=.3)
     ax.set_xlim([0, 2])
-    ax.set_ylim([0, 2])
     ax.set_xticks([0, 1, 2])
+    ax.set_ylim([0, 2])
     ax.set_yticks([0, 1, 2])
+    ax.set_title(f'$N_{{rot}}={{{ANGLES[angle_idx]}}}$', fontsize=10)
 
 # Add labels
-fig.text(0.5, 0.15, 'Symm. empirical error (NTK)', ha='center', fontsize=10)
+fig.text(0.5, 0.1, 'Symm. empirical error (NTK)', ha='center', fontsize=10)
 fig.text(0.0, 0.5, 'Spectral error', va='center', rotation='vertical', fontsize=10)
 
-# Colorbar will be automatically added to the last image
+# Colorbar
 grid.cbar_axes[0].colorbar(sc, format=lambda x, _: f'{100*x:.0f}%')
-grid.cbar_axes[0].set_ylabel('Corr. class \%', fontsize=10)
+grid.cbar_axes[0].set_ylabel(r'Corr. class \%', fontsize=10)
 
 plt.tight_layout()
-plt.show()
+plt.savefig(out_path / f'multiple_seeds_{args.n_hidden}.pdf')
 
-# JUNK
+
+
+# %% JUNK
 
 # considering interactions between seeds of same class
 # orbit_pairs = kronmap(concat_interleave, 2)(orbits_a, orbits_b)
