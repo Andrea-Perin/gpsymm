@@ -1,58 +1,47 @@
 # %% Multiclass stuff
 import numpy as np
-from scipy.interpolate import griddata
 import jax
 from jax import numpy as jnp, random as jr
-from jaxtyping import Array, Float, Integer, Scalar, PyTree, Int, PRNGKeyArray, UInt8
-from typing import Tuple
+from jaxtyping import Array, Float, Scalar, PyTree, Int, PRNGKeyArray
 import einops as ein
 import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
-import itertools as its
 from pathlib import Path
 import optax
-import equinox as eqx
 
-from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, xshift_img, kronmap
-from gp_utils import kreg, circulant_error, make_circulant, extract_components, circulant_predict
-from plot_utils import cm, cloudplot, add_spines
+from utils.conf import load_config
+from utils.mnist_utils import load_images, load_labels, normalize_mnist
+from utils.data_utils import make_rotation_orbit, kronmap
+from utils.gp_utils import make_circulant, circulant_predict
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, InsetPosition
-from mpl_toolkits.axes_grid1 import ImageGrid
-from matplotlib.patheffects import withStroke
 plt.style.use('myplots.mlpstyle')
 
 
 # %% Parameters
-SEED = 12
+cfg = load_config('config.toml')
+SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
+ANGLES = cfg['params']['rotations']
+NUM_SEEDS = cfg['params']['n_seeds']
+CLASSES_PER_TEST = cfg['params']['n_cls_per_test_multiclass']  # how many classes to use per test
 
-ANGLES = [32, 16, 8, 4, 2]
-NUM_SEEDS = 2
+N_EPOCHS = cfg['params']['n_epochs']
+BATCH_SIZE = cfg['params']['batch_size']
+N_CLASSES = 10  # how many classes in MNIST
 N_TESTS = 1
 REG = 1e-4
-CLASSES_PER_TEST = 10  # how many classes to use per test
 
-N_EPOCHS = 10_000
-BATCH_SIZE = 512
-
-N_IMGS = 60_000
-N_CLASSES = 10  # how many classes in MNIST
-out_path = Path('results/m_classification')
-out_path.mkdir(parents=True, exist_ok=True)
+# %% Paths
+res_path = Path(cfg['paths']['res_path']) / 'm_classification'
+res_path.mkdir(parents=True, exist_ok=True)
+img_path = Path(cfg['paths']['img_path'])
+lab_path = Path(cfg['paths']['lab_path'])
 
 
-img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
-lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
-images = normalize_mnist(load_images(img_path=img_path))
+images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
-make_orbit = kronmap(three_shear_rotate, 2)
-orthofft = ft.partial(jnp.fft.fft, norm='ortho')
-find_min_idx = ft.partial(jnp.argmin, axis=1)
 # network and NTK
 def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, mode: str = 'train'):
     return nt.stax.serial(
@@ -70,7 +59,7 @@ def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, m
 init_fn, train_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., dropout_rate=.5)
 _, eval_apply_fn, kernel_fn = net_maker(W_std=1., b_std=1., mode='test')
 kernel_fn = jax.jit(kernel_fn)
-optim = optax.adam(learning_rate=1e-4, b1=0.9, b2=0.7)
+optim = optax.adam(learning_rate=1e-3, b1=0.7, b2=0.9)
 
 
 def kaiming_uniform_pytree(key: PRNGKeyArray, params: PyTree) -> PyTree:
@@ -116,6 +105,13 @@ def loss(
     return cross_entropy(y, pred_y)
 
 
+def get_accuracy(
+    params, x: Float[Array, "batch 28*28"], y: Int[Array, " batch"], key: PRNGKeyArray
+) -> Float[Array, ""]:
+    pred_y = jnp.argmax(jnp.exp(train_apply(params, x, key)), axis=1)
+    return jnp.mean(pred_y == y)
+
+
 def train(
     params,
     train_x,
@@ -142,6 +138,7 @@ def train(
 
     keys = jr.split(key, epochs)
     losses = []
+    train_accs = []
     for epoch, key in enumerate(keys):
         # shuffle x and y
         key, pkey = jr.split(key)
@@ -157,8 +154,8 @@ def train(
                 key
             )
             losses.append(train_loss)
-    return params, losses
-
+        train_accs.append(get_accuracy(params, train_x, train_y, key))
+    return params, losses, train_accs
 
 
 mycat = lambda x, y: jnp.concatenate((x, y), axis=0)
@@ -175,12 +172,12 @@ def peelmap(fn, num):
     return fn
 
 
-# spectral_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
+spectral_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 regression_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 training_preds = np.empty( (len(ANGLES), N_TESTS, CLASSES_PER_TEST, NUM_SEEDS) )
 losses_log = []
 for ia, nangles in enumerate(ANGLES):
-    angles = jnp.linspace(0, 2*jnp.pi, nangles, endpoint=False)
+    angles = jnp.linspace(0, 360, nangles, endpoint=False)
     RNG, test_key = jr.split(RNG)
     test_keys = jr.split(test_key, N_TESTS)
 
@@ -194,21 +191,36 @@ for ia, nangles in enumerate(ANGLES):
         k_classes = jr.split(key, CLASSES_PER_TEST)
         idxs = [jr.choice(k, jnp.argwhere(labels == c), replace=False, shape=(NUM_SEEDS,)) for k, c in zip(k_classes, classes)]
         flat_idxs = ein.rearrange(jnp.array(idxs), 'cls seed 1 -> (cls seed)')
-        orbits = make_orbit(images[flat_idxs], angles)
-        orbits = ein.rearrange( orbits, '(cls seed) angle w h -> cls seed angle (w h)', cls=CLASSES_PER_TEST, seed=NUM_SEEDS )
+        orbits = ein.rearrange(
+            make_rotation_orbit(images[flat_idxs], angles),
+            '(cls seed) angle w h -> (cls seed angle) w h',
+            cls=CLASSES_PER_TEST, seed=NUM_SEEDS, angle=nangles
+        )
+        orbits = normalize_mnist(orbits)
+        orbits = ein.rearrange(orbits, '(cls seed angle) w h -> cls seed angle (w h)',
+            cls=CLASSES_PER_TEST, seed=NUM_SEEDS, angle=nangles
+        )
 
-        # # spectral
-        # pbar_out.set_description('Spectral')
-        # orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
-        # kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
-        # ckernels = peelmap(make_circulant, 4)(kernels)
-        # sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
-        # avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
-        # # remove diagonal on first two axes (we would be comparing class a to itself)
-        # avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
-        # corr_avg_preds = avg_sp_preds > 0
-        # corr_preds = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
-        # spectral_preds[ia, test_idx] = corr_preds
+        # spectral: CAREFUL, THIS ONE REQUIRES LOTS OF MEMORY
+        pbar_out.set_description('Spectral')
+        orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
+        # orbit_pairs = ein.rearrange(orbit_pairs, 'clsa clsb sa sb angle wh -> (clsa clsb sa sb) angle wh')
+        # kernels = jax.lax.map(kernel_fn, orbit_pairs, batch_size=1)
+        # ckernels = jax.lax.map(make_circulant, kernels, batch_size=1)
+        # sp_preds = jax.lax.map(circulant_predict, ckernels, batch_size=1)
+        # sp_preds = ein.rearrange(sp_preds, '(clsa clsb sa sb) -> clsa clsb sa sb',
+        #     clsa=N_CLASSES, clsb=N_CLASSES, sa=NUM_SEEDS, sb=NUM_SEEDS
+        # )
+        # This vmapped thing may be problematic
+        kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
+        ckernels = peelmap(make_circulant, 4)(kernels)
+        sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
+        avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
+        # remove diagonal on first two axes (we would be comparing class a to itself)
+        avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
+        corr_avg_preds = avg_sp_preds > 0
+        corr_preds = ein.reduce(corr_avg_preds, 'clsa clsb sa -> clsa sa', jnp.all)
+        spectral_preds[ia, test_idx] = corr_preds
 
         # regression
         pbar_out.set_description('Regression')
@@ -248,7 +260,7 @@ for ia, nangles in enumerate(ANGLES):
             y_train = jnp.delete(all_ys, idxs, axis=0)
             out_shape, params = init_fn(knet, x_train[0].shape)
             params = kaiming_uniform_pytree(knet, params[:-2])  # remove last two layers
-            params, losses = train(
+            params, losses, train_accs = train(
                 params,
                 x_train,
                 y_train,
@@ -257,23 +269,29 @@ for ia, nangles in enumerate(ANGLES):
                 key=ktrain
             )
             losses_log.append(np.array(losses))
-            plt.figure()
-            plt.plot(np.log(np.array(losses)))
-            plt.title(f'Angle: {nangles}, test: {test_idx}, class: {cls}.')
-            plt.savefig(out_path / f'loss_{nangles}_{test_idx}_{cls}.pdf')
-            plt.close()
+            # plt.figure()
+            # plt.plot(np.log(np.array(losses)))
+            # plt.title(f'Angle: {nangles}, test: {test_idx}, class: {cls}.')
+            # plt.savefig(out_path / f'loss_{nangles}_{test_idx}_{cls}.pdf')
+            # plt.close()
+
+            # plt.figure()
+            # plt.plot(np.array(train_accs))
+            # plt.title(f'Angle: {nangles}, test: {test_idx}, class: {cls}.')
+            # plt.savefig(out_path / f'acc_{nangles}_{test_idx}_{cls}.pdf')
+            # plt.close()
             # record prediction of trained net
             net_outs = jax.nn.log_softmax(eval_apply_fn(params, all_xs[idxs], rng=key))  # key here is only needed for API reasons
             preds = jnp.argmax(jnp.exp(net_outs), axis=-1)
             print(f"\nClass {cls}, test {test_idx}, angles: {nangles}; error is {1-np.mean(preds==cls)}")
-            # print(f"Class {cls}, test {test_idx}, angles: {nangles}; error is {1-np.mean(preds==cls)}")
+            print(f"\nClass {cls}, test {test_idx}, angles: {nangles}; error is {1-get_accuracy(params, x_train, y_train, key)}")
             training_preds[ia, test_idx, cls] = preds
 
 
 # %%
-np.save(out_path / 'regression_predictions', regression_preds)
-# np.save(out_path / 'spectral_predictions', spectral_preds)
-np.save(out_path / 'training_predictions', training_preds)
+np.save(res_path / 'regression_predictions', regression_preds)
+np.save(res_path / 'spectral_predictions', spectral_preds)
+np.save(res_path / 'training_predictions', training_preds)
 
 # # %% Plot
 # regression_preds = np.load(out_path / 'regression_predictions.npy')
