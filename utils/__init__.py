@@ -1,8 +1,9 @@
 from .conf import load_config
 from .gp_utils import make_circulant, extract_components, kreg, circulant_predict, circulant_error
-from .data_utils import kronmap, three_shear_rotate, make_rotation_orbit, scipy_rotate
+from .data_utils import kronmap, three_shear_rotate, make_rotation_orbit, scipy_rotate, get_idxs
 from .mnist_utils import load_images, load_labels, normalize_mnist
 from .plot_utils import cm, semaphore, add_spines
+from .net_utils import kaiming_uniform_pytree
 
 __all__ = [
     'load_config',
@@ -17,8 +18,11 @@ __all__ = [
     'three_shear_rotate',
     'scipy_rotate',
     'make_rotation_orbit',
+    'get_idxs',
 
     'load_images',
     'load_labels',
-    'normalize_mnist'
+    'normalize_mnist',
+
+    'kaiming_uniform_pytree',
 ]

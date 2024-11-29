@@ -1,10 +1,33 @@
 # %%
+from chex import PRNGKey
 from jax import numpy as jnp, random as jr, vmap
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, PRNGKeyArray, UInt8, Int
+from typing import Tuple
 from typing import Callable
 import functools as ft
 import scipy
 import numpy as np
+
+
+
+def get_idxs(
+    key: PRNGKeyArray,
+    n_pairs: int,
+    labels: UInt8[Array, '60000'],
+    collision_rate: float=.1
+) -> Tuple[Int[Array, 'n_pairs'], Int[Array, 'n_pairs']]:
+    assert n_pairs > 0
+    n_pairs_actual = int(n_pairs * (1+collision_rate))
+    num_produced = 0
+    while num_produced < n_pairs:
+        key, key_ab = jr.split(key)
+        idxs_A, idxs_B = jr.randint(key_ab, minval=0, maxval=len(labels), shape=(2, n_pairs_actual,))
+        # remove same-digit pairs
+        labels_A, labels_B = labels[idxs_A], labels[idxs_B]
+        collision_mask = (labels_A == labels_B)
+        idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
+        num_produced = len(idxs_A)
+    return idxs_A, idxs_B
 
 
 scipy_rotate = ft.partial(scipy.ndimage.rotate, axes=(1, 2), reshape=False)

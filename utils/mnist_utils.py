@@ -19,7 +19,7 @@ def load_images(img_path):
         image_data = f.read()
         images = jnp.frombuffer(image_data, dtype=jnp.uint8)\
             .reshape((image_count, row_count, column_count))
-        return images
+        return images / 255.
 
 
 def load_labels(lab_path):
