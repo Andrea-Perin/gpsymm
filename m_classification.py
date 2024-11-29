@@ -204,17 +204,20 @@ for ia, nangles in enumerate(ANGLES):
         # spectral: CAREFUL, THIS ONE REQUIRES LOTS OF MEMORY
         pbar_out.set_description('Spectral')
         orbit_pairs = kronmap(kronmap(concat_interleave, 2), 2)(orbits, orbits)
-        # orbit_pairs = ein.rearrange(orbit_pairs, 'clsa clsb sa sb angle wh -> (clsa clsb sa sb) angle wh')
-        # kernels = jax.lax.map(kernel_fn, orbit_pairs, batch_size=1)
-        # ckernels = jax.lax.map(make_circulant, kernels, batch_size=1)
-        # sp_preds = jax.lax.map(circulant_predict, ckernels, batch_size=1)
-        # sp_preds = ein.rearrange(sp_preds, '(clsa clsb sa sb) -> clsa clsb sa sb',
-        #     clsa=N_CLASSES, clsb=N_CLASSES, sa=NUM_SEEDS, sb=NUM_SEEDS
-        # )
+        orbit_pairs = ein.rearrange(orbit_pairs, 'clsa clsb sa sb angle wh -> (clsa clsb sa sb) angle wh')
+        kernels = jax.lax.map(kernel_fn, orbit_pairs).ntk
+        del orbit_pairs
+        ckernels = jax.lax.map(make_circulant, kernels)
+        del kernels
+        sp_preds = jax.lax.map(circulant_predict, ckernels[:, 0])
+        del ckernels
+        sp_preds = ein.rearrange(sp_preds, '(clsa clsb sa sb) -> clsa clsb sa sb',
+            clsa=N_CLASSES, clsb=N_CLASSES, sa=NUM_SEEDS, sb=NUM_SEEDS
+        )
         # This vmapped thing may be problematic
-        kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
-        ckernels = peelmap(make_circulant, 4)(kernels)
-        sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
+        # kernels = peelmap(kernel_fn, 4)(orbit_pairs).ntk
+        # ckernels = peelmap(make_circulant, 4)(kernels)
+        # sp_preds = peelmap(circulant_predict, 4)(ckernels[..., 0])
         avg_sp_preds = ein.reduce(sp_preds, 'clsa clsb sa sb -> clsa clsb sa', 'mean')
         # remove diagonal on first two axes (we would be comparing class a to itself)
         avg_sp_preds, ps = ein.pack( [jnp.delete(p, i, axis=0) for i, p in enumerate(avg_sp_preds)], '* clsb sa' )
