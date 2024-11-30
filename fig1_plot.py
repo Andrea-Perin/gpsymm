@@ -14,13 +14,13 @@ cfg = load_config('config.toml')
 N_EPOCHS = 22
 ANGLES = cfg['params']['rotations']  # [2, 4, 8, 16, 32, 64]
 out_path = Path(cfg['paths']['out_path'])
-res_path = Path(cfg['paths']['res_path'])
+res_path = Path(cfg['paths']['res_path']) / 'fig1'
 out_dir = out_path / 'fig1'
 out_dir.mkdir(parents=True, exist_ok=True)
 
 
 # %% Load and reshape properly
-data = jnp.load(res_path / 'results_all_epochs.npy')
+data = jnp.load(res_path / 'results.npy')
 avg_data = ein.reduce(data, 'digit ... -> ...', 'mean')
 std_data = ein.reduce(data, 'digit ... -> ...', jnp.std)
 print(f'Shape should be: (num_angles, num_models, num_values, num_epochs): {avg_data.shape}')
