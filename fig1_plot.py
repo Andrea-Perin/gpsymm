@@ -11,11 +11,11 @@ plt.style.use('myplots.mlpstyle')
 
 # %% Load params and paths
 cfg = load_config('config.toml')
-N_EPOCHS = cfg['params']['n_epochs']
+N_EPOCHS = 22
 ANGLES = cfg['params']['rotations']  # [2, 4, 8, 16, 32, 64]
-img_path = Path(cfg['paths']['img_path'])
+out_path = Path(cfg['paths']['out_path'])
 res_path = Path(cfg['paths']['res_path'])
-out_dir = img_path / 'fig1'
+out_dir = out_path / 'fig1'
 out_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -31,6 +31,7 @@ num_rot = ANGLES[angle_idx]
 b_avg = avg_data[angle_idx]
 b_std = std_data[angle_idx]
 c95 = 1.96*b_std / jnp.sqrt(10)
+
 
 fig, axs = plt.subplots(
     figsize=(8.5*cm, 10*cm),
