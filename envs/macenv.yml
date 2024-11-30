@@ -1,0 +1,16 @@
+name: gpsymm_mac
+channels:
+  - conda-forge
+dependencies:
+  - pip
+  - python=3.11
+  - matplotlib
+  - tqdm
+  - numpy
+  - scipy
+  - pip:
+      - "jax[cpu]"
+      - neural-tangents
+      - optax
+      - equinox
+      - einops
