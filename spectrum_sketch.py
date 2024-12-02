@@ -9,7 +9,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 plt.style.use('myplots.mlpstyle')
-from plot_utils import cm, add_spines, clean_3d_ax
+from utils.plot_utils import cm, add_spines, clean_3d_ax
 
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 bcmap = mpl.colors.ListedColormap([colors[0], colors[1]])

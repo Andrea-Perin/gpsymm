@@ -5,9 +5,11 @@ import numpy as np
 import einops as ein
 from jaxlib.xla_client import Layout
 from jaxtyping import Float, Array
-from gp_utils import kreg, extract_components, circulant_error, make_circulant
 import functools as ft
 from pathlib import Path
+
+from utils.gp_utils import kreg, extract_components, circulant_error, make_circulant
+from utils.plot_utils import cm, get_size
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -16,7 +18,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 plt.style.use('./myplots.mlpstyle')
-from plot_utils import cm, get_size
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 bcmap = matplotlib.colors.ListedColormap([colors[0], colors[1]])
 
