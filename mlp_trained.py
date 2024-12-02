@@ -32,7 +32,7 @@ N_ROTATIONS = cfg['params']['rotations']  # [4, 8, 16, 32, 64]
 N_PAIRS = 100 # cfg['params']['n_pairs']
 W_std = 1.
 b_std = 1.
-N_EPOCHS = cfg['params']['n_epochs']
+N_EPOCHS = 1  # cfg['params']['n_epochs']
 BATCH_SIZE = cfg['params']['batch_size']
 
 # %% Paths
@@ -81,8 +81,8 @@ def loss(params: PyTree, x: Float[Array, 'pair 2*angles 28*28'], y: Float[Array,
 
 def train(
     params,
-    train_x,
-    train_y,
+    train_x: Float[Array, 'ens 2*angle 28*28'],
+    train_y: Float[Array, 'ens 2*angle'],
     optim,
     epochs,
     key
@@ -103,18 +103,20 @@ def train(
 
     losses = []
     keys = jr.split(key, num=epochs)
+    num_points = train_x.shape[1]
+    iters_per_epoch = (num_points // BATCH_SIZE + (num_points % BATCH_SIZE > 0))
     for epoch, key in enumerate(keys):
-        # shuffle x and y
+        # shuffle x and y - along second axis!
         key, pkey = jr.split(key)
-        perm = jr.permutation(pkey, len(train_x))
-        train_x = train_x[perm]
-        train_y = train_y[perm]
-        for batch_idx in range(len(train_x) // BATCH_SIZE + 1):
+        perm = jr.permutation(pkey, train_x.shape[1])
+        train_x = train_x[:, perm]
+        train_y = train_y[:, perm]
+        for batch_idx in range(iters_per_epoch):
             params, opt_state, train_loss = make_step(
                 params,
                 opt_state,
-                train_x[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
-                train_y[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+                train_x[:, BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+                train_y[:, BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
             )
             losses.append(train_loss)
     return params, losses
