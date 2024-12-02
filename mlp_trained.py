@@ -29,10 +29,10 @@ cfg = load_config('config.toml')
 SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = cfg['params']['rotations']  # [4, 8, 16, 32, 64]
-N_PAIRS = 100 # cfg['params']['n_pairs']
+N_PAIRS = cfg['params']['n_pairs']
 W_std = 1.
 b_std = 1.
-N_EPOCHS = 1  # cfg['params']['n_epochs']
+N_EPOCHS = cfg['params']['n_epochs']
 BATCH_SIZE = cfg['params']['batch_size']
 
 # %% Paths
