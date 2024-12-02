@@ -1,134 +1,117 @@
 # %% High-d case, but this time with trained networks instead of NTK
-# import pdb
-# pdb.set_trace()
-
 import numpy as np
 import jax
 from jax import numpy as jnp, random as jr
-from jaxtyping import Array, Float, Scalar, PyTree, Int, PRNGKeyArray, UInt8
-import equinox as eqx
+from jaxtyping import Array, Float, Scalar, PyTree, Int, PRNGKeyArray
 import optax
-from typing import Tuple, List
 import einops as ein
 import neural_tangents as nt
 from tqdm import tqdm
 import functools as ft
 from pathlib import Path
+import argparse
 
-from mnist_utils import load_images, load_labels, normalize_mnist
-from data_utils import three_shear_rotate, xshift_img, kronmap
-from gp_utils import make_circulant, circulant_error
-Ensemble = List[Tuple[Array, Array] | Tuple[()]]
+from utils.conf import load_config
+from utils.net_utils import kaiming_uniform_pytree
+from utils.mnist_utils import load_images, load_labels, normalize_mnist
+from utils.data_utils import make_rotation_orbit, get_idxs
+from utils.gp_utils import make_circulant, circulant_error
+Ensemble = PyTree
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Run MLP (trained) analysis')
+parser.add_argument('--n-hidden', type=int, default=1,
+                   help='number of hidden layers (default: 1)')
+args = parser.parse_args()
 
 # %% Parameters
-SEED = 124
+cfg = load_config('config.toml')
+SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
-N_ROTATIONS = [4, 8, 16, 32, 64]
-N_PAIRS = 100
-N_IMGS = 60_000
-IN_SHAPE = 784
-HIDDEN_DIM = 512
-N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
+N_ROTATIONS = cfg['params']['rotations']  # [4, 8, 16, 32, 64]
+N_PAIRS = cfg['params']['n_pairs']
 W_std = 1.
 b_std = 1.
-N_EPOCHS = 15_000
+N_EPOCHS = cfg['params']['n_epochs']
+BATCH_SIZE = cfg['params']['batch_size']
+
+# %% Paths
+res_path = Path(cfg['paths']['res_path']) / f'mlp_trained_{args.n_hidden}'
+res_path.mkdir(parents=True, exist_ok=True)
+img_path = Path(cfg['paths']['img_path'])
+lab_path = Path(cfg['paths']['lab_path'])
+
+
+N_IMGS = 60_000
+HIDDEN_DIM = 512
+N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
 REG = 1e-5
-out_path = Path('results/highd_trained_3layers')
-out_path.mkdir(parents=True, exist_ok=True)
 
 
-img_path = './data/MNIST/raw/train-images-idx3-ubyte.gz'
-lab_path = './data/MNIST/raw/train-labels-idx1-ubyte.gz'
-images = normalize_mnist(load_images(img_path=img_path))
+images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
-make_orbit = kronmap(three_shear_rotate, 2)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 in_shape = images[0].flatten().shape
 # network and NTK
+layer = nt.stax.serial(
+    nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+    nt.stax.Relu(),
+)
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
-    nt.stax.Dense(HIDDEN_DIM, W_std=W_std, b_std=b_std),
-    nt.stax.Relu(),
-    nt.stax.Dense(HIDDEN_DIM, W_std=W_std, b_std=b_std),
-    nt.stax.Relu(),
+    nt.stax.serial(*([layer] * args.n_hidden)),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
 
 
-def kaiming_uniform(in_, shape, key):
-    amax = 1/jnp.sqrt(in_)
-    return jr.uniform(key, shape=shape, minval=-amax, maxval=amax)
-
-
-def init_params(key, uniform: bool = False):
-    key, ens_key = jr.split(key)
-    ens_key = jr.split(ens_key, N_PAIRS)
-    out_shape, params = jax.vmap(init_fn, in_axes=(0, None))(ens_key, in_shape)
-    if uniform:
-        # if here, initialize like PyTorch does. SUPER HACKY
-        nlayers = len(params)
-        new_params = []
-        for l in range(nlayers):
-            key, lk = jr.split(key)
-            wk, bk = jr.split(lk)
-            if params[l] == ():  # activation layer
-                new_params.append( () )
-            else:  # linear layer
-                new_params.append(
-                    (
-                        kaiming_uniform(params[l][0].shape[1], params[l][0].shape, wk),
-                        kaiming_uniform(params[l][1].shape[-1], params[l][1].shape, bk)
-                    )
-                )
-        params = new_params
-    return key, params
-
-
-# %% Optimizer
-schedule = optax.schedules.warmup_exponential_decay_schedule(
-    init_value=1e-3,
-    peak_value=5e-1,
-    warmup_steps=1_000,
-    transition_steps=100,
-    decay_rate=.5
-)
-optim = optax.novograd(learning_rate=schedule)
+optim = optax.adam(learning_rate=1e-3)
 
 
 # %%
-def loss(params: Ensemble, x: Float[Array, 'pair 2*angles 28*28'], y: Float[Array, 'pair 2*angles']) -> Scalar:
+def loss(params: PyTree, x: Float[Array, 'pair 2*angles 28*28'], y: Float[Array, 'pair 2*angles']) -> Scalar:
     yhat = jax.vmap(apply_fn)(params, x)
     mses = ein.reduce((y[..., None]-yhat)**2, 'pair angle d -> pair', 'mean')
     return jnp.sum(mses)
 
 
 def train(
-    params: Ensemble,
-    x: Float[Array, 'pairs 2*angles 28*28'],
-    y: Float[Array, 'pairs 2*angles'],
-    optim: optax.GradientTransformation,
-    epochs: int,
-) -> Tuple[Ensemble, List[float]]:
-
+    params,
+    train_x,
+    train_y,
+    optim,
+    epochs,
+    key
+):
     opt_state = optim.init(params)
 
-    @eqx.filter_jit
+    @jax.jit
     def make_step(
-        params: Ensemble,
+        params,
         opt_state: PyTree,
-        x: Float[Array, "2*angles 28*28"],
-        y: Int[Array, " 2*angles"],
+        x: Float[Array, "batch 28*28"],
+        y: Int[Array, " batch"],
     ):
         loss_value, grads = jax.value_and_grad(loss)(params, x, y)
-        updates, opt_state = optim.update(grads, opt_state, params)
-        params = eqx.apply_updates(params, updates)
+        updates, opt_state = optim.update( grads, opt_state, params )
+        params = optax.apply_updates(params, updates)
         return params, opt_state, loss_value
 
     losses = []
-    for epoch in range(epochs):
-        params, opt_state, train_loss = make_step(params, opt_state, x, y)
-        losses.append(train_loss)
-
+    keys = jr.split(key, num=epochs)
+    for epoch, key in enumerate(keys):
+        # shuffle x and y
+        key, pkey = jr.split(key)
+        perm = jr.permutation(pkey, len(train_x))
+        train_x = train_x[perm]
+        train_y = train_y[perm]
+        for batch_idx in range(len(train_x) // BATCH_SIZE + 1):
+            params, opt_state, train_loss = make_step(
+                params,
+                opt_state,
+                train_x[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+                train_y[BATCH_SIZE*batch_idx: BATCH_SIZE*(batch_idx+1)],
+            )
+            losses.append(train_loss)
     return params, losses
 
 
@@ -139,72 +122,80 @@ def get_data(
     n_pairs: int = N_PAIRS,
     collision_rate: float = 1.,
 ) -> Float[Array, 'pair (angle digit) (width height)']:
-    """BEWARE: This thing draws on and on until it gets n_pairs that are good"""
-    n_pairs_actual = int(n_pairs * (1+collision_rate))
-    angles = jnp.linspace(0, 2*jnp.pi, n_rotations, endpoint=False)
-    num_produced = 0
-    while num_produced < n_pairs:
-        key, key_ab = jr.split(key)
-        idxs_A, idxs_B = jr.randint(key_ab, minval=0, maxval=N_IMGS, shape=(2, n_pairs_actual,))
-        # remove same-digit pairs
-        labels_A, labels_B = labels[idxs_A], labels[idxs_B]
-        collision_mask = (labels_A == labels_B)
-        idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
-        num_produced = len(idxs_A)
+    angles = jnp.linspace(0, 360, n_rotations, endpoint=False)
+    idxs_A, idxs_B = get_idxs(key, n_pairs, labels=labels)
     images_A, images_B = images[idxs_A], images[idxs_B]
-    orbits_A = make_orbit(images_A, angles)
-    orbits_B = make_orbit(images_B, angles + jnp.pi/n_rotations)
+    orbits_A = make_rotation_orbit(images_A, angles)
+    orbits_A = ein.rearrange(orbits_A, 'pair angle w h -> (pair angle) w h')
+    orbits_A = normalize_mnist(orbits_A)
+    orbits_A = ein.rearrange(orbits_A, '(pair angle) w h -> pair angle w h',
+        pair=n_pairs, angle=n_rotations)
+    orbits_B = make_rotation_orbit(images_B, angles)
+    orbits_B = ein.rearrange(orbits_B, 'pair angle w h -> (pair angle) w h')
+    orbits_B = normalize_mnist(orbits_B)
+    orbits_B = ein.rearrange(orbits_B, '(pair angle) w h -> pair angle w h',
+        pair=n_pairs, angle=n_rotations)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * angle width height')
     return ein.rearrange(data, 'pair digit angle width height -> pair (angle digit) (width height)')
 
 
-@jax.jit
-def get_theory_values(data: Float[Array, 'pair (angle digit) (width height)']) -> Float[Array, 'pair N_THEORY_VALS']:
-    # compute the spectral error, lambda_N, lambda_avg, deltasq, and the angle
-    kernels = jax.vmap(kernel_fn)(data, data).ntk
-    ckernels = jax.vmap(make_circulant)(kernels)
-    isp = 1/jnp.abs(jax.vmap(orthofft)(ckernels[:, 0]) + REG*jnp.sqrt(ckernels.shape[-1]))
-    lam_n = isp[:, isp.shape[1]//2]
-    lam_avg = ein.reduce(isp, 'pair spectrum -> pair', 'mean')
-    sp_err = jax.vmap(circulant_error)(ckernels)
-    # deltasq
+def get_deltasq(data: Float[Array, 'pair (angle digit) (width height)']) -> Float[Array, 'pair']:
     rearranged = ein.rearrange(data, 'pair (angle digit) wh -> digit pair angle wh', digit=2)
     projs = ein.reduce(rearranged, 'digit pair angle wh -> digit pair wh', 'mean')
-    deltasq = ein.einsum((projs[0] - projs[1])**2, 'pair wh -> pair')
-    # avg angle
-    avg_angle = ckernels[:, 0, 2]
-    return ein.pack(
-        (sp_err, lam_n, lam_avg, deltasq, avg_angle),
-        'pair *')[0]
+    return ein.einsum((projs[0] - projs[1])**2, 'pair wh -> pair')
 
 
-theory_values = np.empty( (len(N_ROTATIONS), N_PAIRS, N_THEORY_VALS) )
-preds = np.empty( (len(N_ROTATIONS), N_PAIRS, 2) )
-losses = np.empty( (len(N_ROTATIONS), N_EPOCHS, 2) )
-for angle_idx, n_angles in enumerate(tqdm(N_ROTATIONS)):
-    data = get_data(key=RNG, n_rotations=n_angles, n_pairs=N_PAIRS)
-    targets = jnp.array(([+1., -1.]*n_angles))
-    targets = ein.repeat(targets, 'angle -> pair angle', pair=N_PAIRS)
-    # compute the spectral error, lambda_N, lambda_avg, deltasq, and the angle
-    theory_values[angle_idx] = get_theory_values(data)
-    # train on positive
-    RNG, params_p = init_params(RNG, uniform=True)
-    params_p, losses_p = train(params=params_p, x=data[:, 1:], y=targets[:, 1:], optim=optim, epochs=N_EPOCHS)
-    preds_p = jax.vmap(apply_fn)(params_p, data[:, 0])
-    preds[angle_idx, :, :1] = preds_p
-    losses[angle_idx, :, 0] = losses_p
-    del params_p
-    # train on negative
-    RNG, params_m = init_params(RNG, uniform=True)
-    params_m, losses_m = train(params=params_m, x=data[:, :-1], y=targets[:, :-1], optim=optim, epochs=N_EPOCHS)
-    preds_m = jax.vmap(apply_fn)(params_m, data[:, -1])
-    preds[angle_idx, :, 1:] = preds_m
-    losses[angle_idx, :, 1] = losses_m
-    del params_m
+def get_projected_radius(data: Float[Array, 'pair (angle digit) (width height)']) -> Float[Array, 'pair']:
+    rearranged = ein.rearrange(data, 'pair (angle digit) wh -> digit pair angle wh', digit=2)
+    centers = ein.reduce(rearranged, 'digit pair angle wh -> digit pair wh', 'mean')
+    radii_sq = ein.einsum((rearranged[..., 0, :] - centers)**2, 'digit pair wh -> digit pair')
+    return ein.reduce(jnp.sqrt(radii_sq), 'digit pair -> pair', 'mean')
 
 
-# save data
-np.save(out_path / 'theory_values', theory_values)
-np.save(out_path / 'predictions', preds)
-np.save(out_path / 'losses', losses)
-print(f"Saved results in {out_path}")
+results_names = ( 'deltasq', 'sp_errs', 'em_errs', 'lambda_last', 'lambda_avg_no_last', 'lambda_avg', 'proj_radius', 'avg_angle', 'counts')
+results_shape = (len(results_names), len(N_ROTATIONS), N_PAIRS)
+results = np.empty(results_shape)
+keys = jr.split(RNG, len(N_ROTATIONS))
+for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROTATIONS)):
+    data = get_data(key, n_rot)
+    # Empirical i.e. trained network error
+    key, knet, ktrain = jr.split(key, num=3)
+    knet = jr.split(knet, num=N_PAIRS)
+    out_shape, params = jax.vmap(init_fn, in_axes=(0, None))(knet, data[0, 0].shape)
+    # compute symmetrized empirical error
+    x_train = data[:, 1:]
+    y_train = ein.repeat( jnp.array([+1., -1.] * n_rot)[1:], 'angle -> pair angle', pair=N_PAIRS )
+    params = kaiming_uniform_pytree(knet[0], params)  # works on ensembles too!
+    params, losses = train( params, x_train, y_train, optim, epochs=N_EPOCHS, key=ktrain )
+    pred_p = jax.vmap(apply_fn)(params, data[:, :1])
+    em_err_p = jnp.abs(1-pred_p)
+
+    x_train = data[:, :-1]
+    y_train = ein.repeat( jnp.array([+1., -1.] * n_rot)[:-1], 'angle -> pair angle', pair=N_PAIRS )
+    params = kaiming_uniform_pytree(knet[0], params)  # works on ensembles too!
+    params, losses = train( params, x_train, y_train, optim, epochs=N_EPOCHS, key=ktrain )
+    pred_m = jax.vmap(apply_fn)(params, data[:, -1:])
+    em_err_m = jnp.abs(-1-pred_m)
+    # empirical error is the mean between these two
+    empirical_errors = ((em_err_p + em_err_m)/2).squeeze()
+    empirical_correct_preds = ((pred_p > 0) + (pred_m < 0)).squeeze()
+
+    # collect the rest of the stuff
+    deltasq = get_deltasq(data)
+    proj_radius = get_projected_radius(data)
+    kernels = jax.vmap(kernel_fn)(data, data).ntk
+    ckernels = jax.vmap(make_circulant)(kernels)
+    spectral_errors = jax.vmap(circulant_error)(ckernels)
+    # avg angle? (AR+BR)/2
+    avg_angle = ein.reduce(ckernels[:, 0, 2::2], 'n k -> n', 'mean')
+    # computation of elements of the inverse spectrum. NOTE THE REGULARIZATION
+    # CONSTANT: see https://numpy.org/doc/stable/reference/routines.fft.html#normalization
+    # isp = 1/jnp.abs(jax.vmap(orthofft)(ckernels[:, 0]) + REG*jnp.sqrt(2*n_rot))
+    isp = 1/jnp.abs(jax.vmap(jnp.fft.fft)(ckernels[:, 0]))
+    lambda_last = isp[:, n_rot]
+    lambda_avg_no_last = ein.reduce(jnp.delete(isp, n_rot, axis=1), 'n d -> n', 'mean')
+    lambda_avg = ein.reduce(isp, 'n d -> n', 'mean')
+    # loading of results
+    results[:, idx] = deltasq, spectral_errors, empirical_errors, lambda_last, lambda_avg_no_last, lambda_avg, proj_radius, avg_angle, empirical_correct_preds
+
+np.save(res_path / 'results', results)
