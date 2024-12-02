@@ -29,7 +29,7 @@ cfg = load_config('config.toml')
 SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
 N_ROTATIONS = cfg['params']['rotations']  # [4, 8, 16, 32, 64]
-N_PAIRS = cfg['params']['n_pairs']
+N_PAIRS = 100 # cfg['params']['n_pairs']
 W_std = 1.
 b_std = 1.
 N_EPOCHS = cfg['params']['n_epochs']
@@ -53,12 +53,17 @@ labels = load_labels(lab_path=lab_path)
 orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 in_shape = images[0].flatten().shape
 # network and NTK
-layer = nt.stax.serial(
+# layer = nt.stax.serial(
+#     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
+#     nt.stax.Relu(),
+# )
+# init_fn, apply_fn, kernel_fn = nt.stax.serial(
+#     nt.stax.serial(*([layer] * args.n_hidden)),
+#     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
+# )
+init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Dense(512, W_std=W_std, b_std=b_std),
     nt.stax.Relu(),
-)
-init_fn, apply_fn, kernel_fn = nt.stax.serial(
-    nt.stax.serial(*([layer] * args.n_hidden)),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
