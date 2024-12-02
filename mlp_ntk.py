@@ -37,10 +37,9 @@ lab_path = Path(cfg['paths']['lab_path'])
 # %% File specific stuff
 REG = 1e-4
 W_std, b_std = 1., 1.
-n_hidden_layers = 2
-res_path = Path(cfg['paths']['res_path']) / f'mlp_{n_hidden_layers}'
+res_path = Path(cfg['paths']['res_path']) / f'mlp_{args.n_hidden}'
 res_path.mkdir(parents=True, exist_ok=True)
-out_path = Path(f'images/mlp_{n_hidden_layers}')
+out_path = Path(f'images/mlp_{args.n_hidden}')
 out_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -54,7 +53,7 @@ layer = nt.stax.serial(
     nt.stax.Relu(),
 )
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
-    nt.stax.serial(*([layer] * n_hidden_layers)),
+    nt.stax.serial(*([layer] * args.n_hidden)),
     nt.stax.Dense(1, W_std=W_std, b_std=b_std)
 )
 kernel_fn = jax.jit(kernel_fn)
