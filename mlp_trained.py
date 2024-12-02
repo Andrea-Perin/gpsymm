@@ -185,7 +185,7 @@ for idx, (n_rot, key) in tqdm(enumerate(zip(N_ROTATIONS, keys)), total=len(N_ROT
     em_err_m = jnp.abs(-1-pred_m)
     # empirical error is the mean between these two
     empirical_errors = ((em_err_p + em_err_m)/2).squeeze()
-    empirical_correct_preds = ((pred_p > 0) + (pred_m < 0)).squeeze()
+    empirical_correct_preds = ((pred_p > 0).astype(float) + (pred_m < 0).astype(float)).squeeze()
 
     # collect the rest of the stuff
     deltasq = get_deltasq(data)
