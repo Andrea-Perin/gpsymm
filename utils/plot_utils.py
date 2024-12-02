@@ -1,3 +1,4 @@
+import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
@@ -63,3 +64,26 @@ def clean_3d_ax(ax):
     ax.set_zticks([])
     ax.grid(False)
     return ax
+
+
+def format_axis_scientific(ax, axis='x', pos=(1., -.14)):
+    """Format axis ticks to use scientific notation with multiplier at bottom.
+
+    Args:
+        ax: matplotlib axis object
+        axis: 'x' or 'y' to specify which axis to format
+        pos: tuple (x, y) for position of multiplier text in axes coordinates
+    """
+    ax.ticklabel_format(style='sci', axis=axis, scilimits=(0,0))
+    if axis == 'x':
+        ax.get_xaxis().get_offset_text().set_visible(False)
+        ax_max = max(ax.get_xticks())
+    else:  # axis == 'y'
+        ax.get_yaxis().get_offset_text().set_visible(False)
+        ax_max = max(ax.get_yticks())
+
+    exponent_axis = np.floor(np.log10(ax_max)).astype(int)
+    txt = ax.annotate(r'$\times$10$^{%i}$'%(exponent_axis),
+                      xy=pos,
+                      xycoords='axes fraction')
+    return txt
