@@ -95,10 +95,10 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     add_inner_title(grid[0], 'Spectral error', loc='upper right')
     add_inner_title(grid[0], titlestr, loc='lower right')
 
-    sciexp = format_axis_scientific(grid[0], axis='y', pos=(-.139, 1.))
-    sciexp.set_fontsize(8)
-    sciexp.set_rotation(90)
-    sciexp.set_verticalalignment('center')
+    # sciexp = format_axis_scientific(grid[0], axis='y', pos=(-.139, 1.))
+    # sciexp.set_fontsize(8)
+    # sciexp.set_rotation(90)
+    # sciexp.set_verticalalignment('center')
     for tick in grid[0].get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment('center')
@@ -110,17 +110,19 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     add_inner_title(grid[1], 'Empirical error', loc='upper right')
     add_inner_title(grid[1], titlestr, loc='lower right')
 
-    sciexp = format_axis_scientific(grid[1], axis='y', pos=(-.139, 1.))
-    sciexp.set_fontsize(8)
-    sciexp.set_rotation(90)
-    sciexp.set_verticalalignment('center')
+    # sciexp = format_axis_scientific(grid[1], axis='y', pos=(-.139, 1.))
+    # sciexp.set_fontsize(8)
+    # sciexp.set_rotation(90)
+    # sciexp.set_verticalalignment('center')
     for tick in grid[1].get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment('center')
         tick.set_fontsize(8)
 
-    cbar = grid.cbar_axes[0].colorbar(im1)
+    cbar = grid.cbar_axes[0].colorbar(im2)
     cbar.set_label('Error magnitude')
+    ticks = cbar.get_ticks()
+    cbar.set_ticks(ticks[::2])
     cbar.ax.tick_params(labelsize=8)
 
     plt.subplots_adjust(top=1, bottom=0, wspace=0, hspace=0)
