@@ -76,6 +76,10 @@ def init_params(key: PRNGKeyArray, in_shape: Tuple[int]) -> Tuple[PRNGKeyArray, 
     return key, params
 
 
+xroll = ft.partial(jnp.roll, axis=1)
+def make_discrete_shift(imgs, shifts):
+    return jax.vmap(jax.vmap(xroll, in_axes=(None, 0)), in_axes=(0, None))(imgs, shifts)
+
 # %% EVERYTHING ELSE
 def get_data(
     key: PRNGKeyArray,
@@ -85,7 +89,7 @@ def get_data(
 ) -> Float[Array, 'pair (shift digit) width height 1']:
     n_pairs_actual = int(n_pairs * (1+collision_rate))
     key_a, key_b = jr.split(key)
-    shifts = jnp.linspace(0, 1, n_shifts, endpoint=False)
+    # shifts = jnp.linspace(0, 1, n_shifts, endpoint=False)
     idxs_A, idxs_B = jr.randint(key, minval=0, maxval=len(images), shape=(2, n_pairs_actual,))
     # remove same-digit pairs
     labels_A, labels_B = labels[idxs_A], labels[idxs_B]
@@ -93,8 +97,9 @@ def get_data(
     idxs_A, idxs_B = idxs_A[~collision_mask][:n_pairs], idxs_B[~collision_mask][:n_pairs]
     #
     images_A, images_B = images[idxs_A], images[idxs_B]
-    orbits_A = make_xshift_orbit(images_A, shifts)
-    orbits_B = make_xshift_orbit(images_B, shifts)
+    shifts = jnp.arange(28, step=28//n_shifts, dtype=int)
+    orbits_A = make_discrete_shift(images_A, shifts)
+    orbits_B = make_discrete_shift(images_B, shifts)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * shift width height')
     data = normalize_mnist(ein.rearrange(data, 'p d s w h -> (p d s) w h'))
     if DEMEAN:
@@ -102,7 +107,7 @@ def get_data(
     return ein.rearrange(
         data,
         '(pair digit shift) width height -> pair (shift digit) width height 1',
-        digit=2, angle=n_shifts, pair=len(orbits_A)
+        digit=2, shift=n_shifts, pair=len(orbits_A)
     )
 
 
