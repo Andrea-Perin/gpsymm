@@ -21,6 +21,8 @@ from utils.gp_utils import make_circulant, circulant_error, extract_components, 
 parser = argparse.ArgumentParser(description='Run CNN NTK analysis')
 parser.add_argument('--gap', action='store_true',
                     help='whether to use Global Average Pooling layer (default: False)')
+parser.add_argument('--demean', action='store_true',
+                    help='whether to have 0-mean inputs (default: False)')
 args = parser.parse_args()
 
 
@@ -28,7 +30,7 @@ args = parser.parse_args()
 cfg = load_config('config.toml')
 SEED = cfg['params']['seed']
 RNG = jr.PRNGKey(SEED)
-N_SHIFTS = cfg['params']['rotations']
+N_SHIFTS = cfg['params']['shifts']
 N_PAIRS = cfg['params']['n_pairs']
 
 # %% Paths
@@ -37,11 +39,12 @@ lab_path = Path(cfg['paths']['lab_path'])
 res_path = Path(cfg['paths']['res_path'])
 
 # %% File-specific stuff
-IS_FC = args.gap
+IS_GAP = args.gap
+DEMEAN = args.demean
 REG = 1e-5
 W_std = 1.
 b_std = 1.
-res_path = res_path / ('cntk_shift_' + ('fc' if IS_FC else 'gap'))
+res_path = res_path / ('cntk_shift_' + ('gap' if IS_GAP else 'fc') + '_' + ('demean' if DEMEAN else ''))
 res_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -55,7 +58,7 @@ conv =  nt.stax.serial(
     nt.stax.Conv(out_chan=64, filter_shape=(3, 3), padding='CIRCULAR', W_std=W_std, b_std=None),
     nt.stax.Relu()
 )
-pool = nt.stax.Identity() if IS_FC else nt.stax.GlobalAvgPool()
+pool = nt.stax.GlobalAvgPool() if IS_GAP else nt.stax.Identity()
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
     conv,
     pool,
@@ -94,6 +97,8 @@ def get_data(
     orbits_B = make_xshift_orbit(images_B, shifts)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * shift width height')
     data = normalize_mnist(ein.rearrange(data, 'p d s w h -> (p d s) w h'))
+    if DEMEAN:
+        data -= jnp.mean(data, axis=(-1, -2), keepdims=True)
     return ein.rearrange(
         data,
         '(pair digit shift) width height -> pair (shift digit) width height 1',

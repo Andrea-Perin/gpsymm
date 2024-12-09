@@ -188,19 +188,23 @@ def main():
     parser = argparse.ArgumentParser(description='Create plots from results file')
     parser.add_argument('results_file', type=str, help='Path to the numpy results file')
     parser.add_argument('output_path', type=str, help='Directory to save the plots')
-    parser.add_argument('--rot-idx', type=int, default=2,
-                       help='Index of rotation to plot (default: 2)')
+    parser.add_argument('--idx', type=int, default=2,
+                       help='Index of N to plot (default: 2)')
     parser.add_argument('--alpha', type=float, default=.1,
                        help='Transparency of scatter dots (default: .1)')
+    parser.add_argument('--shift', action='store_true',
+                       help='whether to use shifts (default: False)')
     args = parser.parse_args()
 
     # Load config and then results
     cfg = load_config()
     n_rotations = cfg['params']['rotations']
+    n_shifts = cfg['params']['shifts']
     results = np.load(args.results_file)
+    num_things = n_shifts if args.shift else n_rotations
 
     # Create plots
-    plot_panels(results, n_rotations, args.rot_idx, args.output_path, alpha=args.alpha)
+    plot_panels(results, num_things, args.idx, args.output_path, alpha=args.alpha)
 
 
 if __name__ == '__main__':

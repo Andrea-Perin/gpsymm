@@ -23,7 +23,10 @@ plt.style.use('myplots.mlpstyle')
 parser = argparse.ArgumentParser(description='Run MLP NTK analysis with multiple seeds')
 parser.add_argument('--n-hidden', type=int, default=1,
                    help='number of hidden layers (default: 1)')
+parser.add_argument('--rot-idx', type=int, default=2,
+    help='Select how many rotations (default: 2)')
 args = parser.parse_args()
+
 
 # %% Parameters
 cfg = load_config('config.toml')
@@ -171,6 +174,43 @@ plt.tight_layout()
 plt.savefig(out_path / f'multiple_seeds_{args.n_hidden}.pdf')
 
 
+# %% Single panel version
+figsize = (6*cm, 5*cm)
+fig = plt.figure(figsize=figsize)
+ax = fig.add_subplot(111, aspect='equal')
+
+assert (not jnp.any(jnp.isnan(results)))
+maxres = jnp.max(results)
+
+sc = ax.scatter(
+    np.mean(results[args.rot_idx, :, 1:], axis=1),
+    results[args.rot_idx, :, 0],
+    c=colors_semaphore[args.rot_idx],
+    cmap='RdYlGn',
+    vmin=0,
+    vmax=1,
+    s=2
+)
+ax.plot([0, maxres], [0, maxres], '--', c='k', lw=.3)
+ax.set_xlim([0, 2])
+ax.set_xticks([0, 1, 2])
+ax.set_ylim([0, 2])
+ax.set_yticks([0, 1, 2])
+ax.set_title(f'$N_{{rot}}={{{ANGLES[args.rot_idx]}}}$', fontsize=10)
+
+# Add labels
+ax.set_xlabel('Empirical error (NTK)', fontsize=10)
+ax.set_ylabel('Spectral error', fontsize=10)
+
+# Colorbar
+cbar = plt.colorbar(sc, fraction=0.046, pad=0.04)
+cbar.set_label(r'Corr. class \%', fontsize=10)
+labels = [0, 50, 100]
+cbar.ax.set_yticklabels(labels, rotation=90)
+
+plt.tight_layout()
+plt.savefig(out_path / f'multiple_seeds_{args.n_hidden}_{args.rot_idx}.pdf')
+plt.close()
 
 # %% JUNK
 

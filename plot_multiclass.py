@@ -56,7 +56,7 @@ def main():
     spectral_avg = ein.reduce(spectral_acc, 'angle digit -> angle', 'mean')
     spectral_c95 = 1.96 * ein.reduce(spectral_acc, 'angle digit -> angle', jnp.std) / jnp.sqrt(10)
 
-    # Plot
+    # Plot 1
     fig = plt.figure(figsize=(17*cm, 5*cm))
     grid = ImageGrid(
         fig, 111,
@@ -93,6 +93,22 @@ def main():
     # plt.show()
     plt.close()
 
+    # Plot 2
+    fig = plt.figure(figsize=(8*cm, 5*cm))
+    ax = fig.add_subplot(111)
+    tickspos = list(range(len(angles)))
+    ax.set_xticks(tickspos, angles)
+    ax.set_ylabel('Accuracy', fontsize=10)
+    ax.set_xlabel(r'$N_{{rot}}$', fontsize=10)
+    ax.plot(train_avg, '-o', label='Trained')
+    ax.fill_between(tickspos, train_avg-train_c95, train_avg+train_c95, alpha=.2)
+    ax.plot(spectral_avg, '-o', label='Spectral')
+    ax.fill_between(tickspos, spectral_avg-spectral_c95, spectral_avg+spectral_c95, alpha=.2)
+    ax.legend(fontsize=8)
+    plt.tight_layout(pad=0.4)
+    plt.savefig(out_dir / 'multiclass_single_panel.pdf')
+    # plt.show()
+    plt.close()
 
 if __name__ == '__main__':
     main()

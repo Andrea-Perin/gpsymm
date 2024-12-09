@@ -1,6 +1,7 @@
 [params]
 seed = 124
 rotations = [2, 4, 8, 16, 32, 64]
+shifts = [2, 4, 7, 14, 28]
 n_pairs = 512
 n_imgs = 60000
 n_seeds = 13
