@@ -65,7 +65,7 @@ init_fn, apply_fn, kernel_fn = nt.stax.serial(
     nt.stax.Flatten(),
     nt.stax.Dense(1, W_std=W_std, b_std=None)
 )
-kernel_fn = nt.batch(kernel_fn, device_count=-1, batch_size=1)
+kernel_fn = nt.batch(kernel_fn, device_count=2, batch_size=1)
 make_xshift_orbit = kronmap(xshift_img, 2)
 
 
