@@ -87,9 +87,10 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
 
     vmin = min(np.nanmin(zi_spec), np.nanmin(zi_emp))
     vmax = max(np.nanmax(zi_spec), np.nanmax(zi_emp))
+    levels = np.linspace(vmin, vmax, 11)
     titlestr = f'$N_{{rot}}={n_rotations[rot_idx]}$'
 
-    im1 = grid[0].contourf(xi, yi, zi_spec, levels=10, cmap='viridis', vmin=vmin, vmax=vmax)
+    im1 = grid[0].contourf(xi, yi, zi_spec, levels=levels, cmap='viridis', vmin=vmin, vmax=vmax)
     grid[0].set_xlabel(r'$\lambda^{-1}_{N}$')
     grid[0].set_ylabel(r'$\langle\lambda^{-1}\rangle$')
     add_inner_title(grid[0], 'Spectral error', loc='upper right')
@@ -104,7 +105,7 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
         tick.set_verticalalignment('center')
         tick.set_fontsize(8)
 
-    im2 = grid[1].contourf(xi, yi, zi_emp, levels=10, cmap='viridis', vmin=vmin, vmax=vmax)
+    im2 = grid[1].contourf(xi, yi, zi_emp, levels=levels, cmap='viridis', vmin=vmin, vmax=vmax)
     grid[1].set_xlabel('$\lambda^{-1}_{N}$')
     grid[1].set_ylabel(r'$\langle\lambda^{-1}\rangle$')
     add_inner_title(grid[1], 'Empirical error', loc='upper right')
@@ -202,6 +203,7 @@ def main():
     n_shifts = cfg['params']['shifts']
     results = np.load(args.results_file)
     num_things = n_shifts if args.shift else n_rotations
+    print(num_things)
 
     # Create plots
     plot_panels(results, num_things, args.idx, args.output_path, alpha=args.alpha)

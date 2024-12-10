@@ -50,7 +50,7 @@ def kreg(
         mean: Predicted mean for test points.
         var: Predicted variance for test points.
     """
-    reg *= ein.einsum(k11, 'i i ->') 
+    reg *= ein.einsum(k11, 'i i ->')
     sol = jax.scipy.linalg.solve(k11 + reg*jnp.eye(len(k11)), k12, assume_a='pos')
     mean = ein.einsum(sol, y, 'train test, train d-> test d')
     var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
@@ -92,8 +92,7 @@ def circulant_error(k: Float[Array, 'n n'], reg: float = 1e-5) -> Scalar:
         float: The predicted error for the interleaved 2-class setting.
     """
     sp = jnp.fft.fft(k[0])
-    reg *= sp[0]
-    isp = 1 / jnp.abs(sp + reg)
+    isp = 1 / jnp.abs(sp + reg*k[0, 0]*len(k))
     return isp[len(isp)//2]/jnp.mean(isp)
 
 

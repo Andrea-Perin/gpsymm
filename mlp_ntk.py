@@ -35,7 +35,7 @@ lab_path = Path(cfg['paths']['lab_path'])
 
 
 # %% File specific stuff
-REG = 1e-4
+REG = 1e-10
 W_std, b_std = 1., 1.
 res_path = Path(cfg['paths']['res_path']) / f'mlp_{args.n_hidden}'
 res_path.mkdir(parents=True, exist_ok=True)
