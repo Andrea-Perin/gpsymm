@@ -45,7 +45,7 @@ lab_path = Path(cfg['paths']['lab_path'])
 N_IMGS = 60_000
 HIDDEN_DIM = 512
 N_THEORY_VALS = len(['sp_err', 'lambda_n', 'lambda_avg', 'deltasq', 'avg_angle'])
-REG = 1e-5
+REG = 1e-10
 
 
 images = load_images(img_path=img_path)

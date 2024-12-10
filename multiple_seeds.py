@@ -44,7 +44,7 @@ lab_path = Path(cfg['paths']['lab_path'])
 
 # %% Other params
 # TEMP = 0.  # for softmax purposes, not used
-REG = 1e-4
+REG = 1e-10
 N_CLASSES = 10  # Instead of having a magic number 10 around the codebase
 
 W_std, b_std = 1., 1.

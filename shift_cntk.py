@@ -41,7 +41,7 @@ res_path = Path(cfg['paths']['res_path'])
 # %% File-specific stuff
 IS_GAP = args.gap
 DEMEAN = args.demean
-REG = 1e-5
+REG = 1e-10
 W_std = 1.
 b_std = 1.
 res_path = res_path / ('cntk_shift_' + ('gap' if IS_GAP else 'fc') + '_' + ('demean' if DEMEAN else ''))

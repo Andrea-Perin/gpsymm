@@ -31,7 +31,7 @@ N_EPOCHS = cfg['params']['n_epochs']
 BATCH_SIZE = cfg['params']['batch_size']
 N_CLASSES = 10  # how many classes in MNIST
 N_TESTS = 1
-REG = 1e-4
+REG = 1e-10
 
 # %% Paths
 res_path = Path(cfg['paths']['res_path']) / 'm_classification'
