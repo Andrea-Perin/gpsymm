@@ -21,6 +21,8 @@ from utils.gp_utils import make_circulant, circulant_error, extract_components, 
 parser = argparse.ArgumentParser(description='Run CNN NTK analysis')
 parser.add_argument('--gap', action='store_true',
                     help='whether to use Global Average Pooling layer (default: False)')
+parser.add_argument('--kernel-size', type=int, default=3,
+                    help='size of the convolutional kernel (default: 3)')
 args = parser.parse_args()
 
 
@@ -52,7 +54,7 @@ orthofft = ft.partial(jnp.fft.fft, norm='ortho')
 in_shape = (1, *images[0].shape, 1)
 # network and NTK
 conv =  nt.stax.serial(
-    nt.stax.Conv(out_chan=64, filter_shape=(3, 3), padding='CIRCULAR', W_std=W_std, b_std=None),
+    nt.stax.Conv(out_chan=64, filter_shape=(args.kernel_size, args.kernel_size), padding='CIRCULAR', W_std=W_std, b_std=None),
     nt.stax.Relu()
 )
 pool = nt.stax.Identity() if IS_FC else nt.stax.GlobalAvgPool()
