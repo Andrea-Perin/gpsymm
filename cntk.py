@@ -43,7 +43,7 @@ IS_FC = args.gap
 REG = 1e-10
 W_std = 1.
 b_std = 1.
-res_path = res_path / ('cntk_' + ('fc' if IS_FC else 'gap'))
+res_path = res_path / ('cntk_' + ('fc' if IS_FC else 'gap') + '_' + f'{args.kernel_size}')
 res_path.mkdir(parents=True, exist_ok=True)
 
 
