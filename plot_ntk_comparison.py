@@ -33,6 +33,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 
 
 # load files
+simple_mlp = np.load(res_dir / 'mlp_1/results.npy')
 deep_mlp = np.load(res_dir / 'mlp_5/results.npy')
 train_mlp = np.load(res_dir / 'mlp_trained_1/results.npy')
 cnn_fc = np.load(res_dir / 'cntk_fc/results.npy')
@@ -42,10 +43,9 @@ cnn_gap = np.load(res_dir / 'cntk_gap/results.npy')
 # Set up figure
 figsize = (17*cm, 5*cm)  # Adjust size as needed
 fig = plt.figure(figsize=figsize)
-# Create ImageGrid
 grid = ImageGrid(fig, 111,
-                nrows_ncols=(1, 4),  # 1 row, 4 columns for the 4 models
-                axes_pad=0.1,
+                nrows_ncols=(1, 5),
+                axes_pad=0.15,
                 share_all=True,
                 aspect=True,  # Forces square aspect ratio
                 cbar_location="right",
@@ -55,9 +55,9 @@ grid = ImageGrid(fig, 111,
                 )
 
 # List of data and titles
-data_list = [deep_mlp, train_mlp, cnn_fc, cnn_gap]
-titles = ['5 HL MLP', 'Trained MLP', 'CNN-FC', 'CNN-GAP']
-xlabs = ['Empirical err. (NTK)', 'Empirical err. (train)', 'Empirical err. (NTK)', 'Empirical err. (NTK)']
+data_list = [simple_mlp, deep_mlp, train_mlp, cnn_fc, cnn_gap]
+titles = ['1HL MLP', '5HL MLP', 'Trained 1HL MLP', 'CNN-FC', 'CNN-GAP']
+xlabs = ['Emp. err. (NTK)', 'Emp err. (NTK)', 'Emp err. (train)', 'Emp err. (NTK)', 'Emp err. (NTK)']
 
 # Plot in each axis
 norm = plt.Normalize(vmin=0, vmax=2)

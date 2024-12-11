@@ -14,7 +14,7 @@ from utils.plot_utils import cm, add_inner_title, semaphore, format_axis_scienti
 plt.style.use('myplots.mlpstyle')
 
 
-def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
+def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
     """Create and save plots B through E from the results."""
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -26,12 +26,13 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     # Additional processing
     lambda_last *= jnp.sqrt(jnp.array(n_rotations)[:, None])
 
+    transf_type = 'shift' if shift else 'rot'
     # PANEL B
     fig = plt.figure(figsize=(5.75*cm, 5*cm))
     grid = ImageGrid(
         fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
         cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
-    grid[0].set_title(f"$N_{{rot}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
+    grid[0].set_title(f"$N_{{{transf_type}}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
     grid[0].set_xlabel("Empirical error (NTK)")
     grid[0].set_ylabel("Spectral error")
     norm = plt.Normalize(vmin=0, vmax=2)
@@ -53,8 +54,26 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     cbar.ax.set_yticklabels((0, 1, 2), va='center')
     cmax = max(empirical_errors[rot_idx].max(), spectral_errors[rot_idx].max())
     grid[0].plot([0, cmax], [0, cmax], color='black', alpha=1, lw=.75, ls='--')
-    grid[0].set_xlim((0, None))
-    grid[0].set_ylim((0, None))
+    grid[0].set_xlim((0, 2))
+    grid[0].set_ylim((0, 2))
+
+    # # INSET CODE IF NEEDED
+    # inset_ax = grid[0].inset_axes([0.45, 0.45, 0.5, 0.5])  # [x, y, width, height] in axes coordinates
+    # inset_ax.scatter(
+    #     empirical_errors[rot_idx],
+    #     spectral_errors[rot_idx],
+    #     c=emp_counts[rot_idx],
+    #     marker='.', alpha=alpha, s=2,
+    #     cmap=semaphore,
+    #     norm=norm
+    # )
+    # inset_ax.plot([0, 0.1], [0, 0.1], color='black', alpha=1, lw=.75, ls='--')
+    # inset_ax.set_xlim(0, 0.1)
+    # inset_ax.set_ylim(0, 0.1)
+    # inset_ax.set_xticks([0, 0.1])
+    # inset_ax.set_yticks([0, 0.1])
+    # # Add connecting lines
+    # grid[0].indicate_inset_zoom(inset_ax, edgecolor="black")
     plt.tight_layout(pad=0.4)
     plt.savefig(output_path / f'panelB_{n_rotations[rot_idx]}.pdf')
     plt.close()
@@ -65,11 +84,19 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     spec_errs = spectral_errors[rot_idx]
     emp_errs = empirical_errors[rot_idx]
 
-    xi = np.linspace(ll.min(), ll.max(), 100)
-    yi = np.linspace(lnl.min(), lnl.max(), 100)
+    xi = np.linspace(ll.min(), ll.max(), 1000)
+    yi = np.linspace(lnl.min(), lnl.max(), 1000)
     xi, yi = np.meshgrid(xi, yi)
+
     zi_spec = griddata((ll, lnl), spec_errs, (xi, yi), method='linear')
     zi_emp = griddata((ll, lnl), emp_errs, (xi, yi), method='linear')
+
+    # zi_spec = griddata((ll, lnl), spec_errs, (xi, yi), method='linear', fill_value=np.nan)
+    # zi_spec_nn = griddata((ll, lnl), spec_errs, (xi, yi), method='nearest')
+    # zi_spec = np.where(np.isnan(zi_spec), zi_spec_nn, zi_spec)
+    # zi_emp = griddata((ll, lnl), emp_errs, (xi, yi), method='linear', fill_value=np.nan)
+    # zi_emp_nn = griddata((ll, lnl), emp_errs, (xi, yi), method='nearest')
+    # zi_emp = np.where(np.isnan(zi_emp), zi_emp_nn, zi_emp)
 
     fig = plt.figure(figsize=(5*cm, 10*cm))
     grid = ImageGrid(
@@ -88,7 +115,7 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     vmin = min(np.nanmin(zi_spec), np.nanmin(zi_emp))
     vmax = max(np.nanmax(zi_spec), np.nanmax(zi_emp))
     levels = np.linspace(vmin, vmax, 11)
-    titlestr = f'$N_{{rot}}={n_rotations[rot_idx]}$'
+    titlestr = f'$N_{{{transf_type}}}={n_rotations[rot_idx]}$'
 
     im1 = grid[0].contourf(xi, yi, zi_spec, levels=levels, cmap='viridis', vmin=vmin, vmax=vmax)
     grid[0].set_xlabel(r'$\lambda^{-1}_{N}$')
@@ -137,7 +164,7 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     grid = ImageGrid(
         fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
         cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
-    grid[0].set_title(f"$N_{{rot}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
+    grid[0].set_title(f"$N_{{{transf_type}}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
     grid[0].set_ylabel(r"$\Delta^2$")
     grid[0].set_xlabel(r"$\lambda_N$")
     im = grid[0].scatter(
@@ -167,7 +194,7 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha):
     grid = ImageGrid(
         fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
         cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
-    grid[0].set_title(f"$N_{{rot}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
+    grid[0].set_title(f"$N_{{{transf_type}}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
     grid[0].set_ylabel(r"$1/\rho$")
     grid[0].set_xlabel(r"$\langle\lambda^{-1}\rangle$")
     im = grid[0].scatter(
@@ -206,7 +233,7 @@ def main():
     print(num_things)
 
     # Create plots
-    plot_panels(results, num_things, args.idx, args.output_path, alpha=args.alpha)
+    plot_panels(results, num_things, args.idx, args.output_path, alpha=args.alpha, shift=args.shift)
 
 
 if __name__ == '__main__':
