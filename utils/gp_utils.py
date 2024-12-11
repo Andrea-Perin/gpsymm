@@ -2,7 +2,6 @@
 import jax
 from jax import numpy as jnp
 from jaxtyping import Float, Array, Scalar
-import lineax as lx
 import einops as ein
 
 
