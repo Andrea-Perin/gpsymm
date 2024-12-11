@@ -47,6 +47,16 @@ ax.scatter(data[0, 2], data[0, 1], data[0, 0], c='black', marker='o', depthshade
 theta = jnp.linspace(0, 2 * jnp.pi, 201)
 ax.plot(jnp.ones_like(theta)*D/2, jnp.sin(theta), jnp.cos(theta), linestyle='--', c=colors[0], lw=.5)
 ax.plot(-D/2*jnp.ones_like(theta), jnp.sin(theta), jnp.cos(theta), linestyle='--', c=colors[1], lw=.5)
+# plot a dashed line between circles
+# TODO
+ax.plot(
+    (data[0, 2], data[0, 2]-D),
+    (data[0, 1], data[0, 1]),
+    (data[0, 0], data[0, 0]),
+    linestyle='--', color='gray'
+)
+ax.text(0, 0, 1.1, '$\Delta$')
+
 ax.text2D(0.25, 0.05, "x", transform=ax.transAxes)
 ax.text2D(0.85, 0.15, "y", transform=ax.transAxes)
 ax.text2D(0.95, 0.85, "z", transform=ax.transAxes)
