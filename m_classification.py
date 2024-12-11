@@ -43,7 +43,12 @@ lab_path = Path(cfg['paths']['lab_path'])
 images = load_images(img_path=img_path)
 labels = load_labels(lab_path=lab_path)
 # network and NTK
-def net_maker(W_std: float = 1., b_std: float = 1., dropout_rate: float = 0.5, mode: str = 'train'):
+def net_maker(
+    W_std: float = 1.,
+    b_std: float = 1.,
+    dropout_rate: float = 0.5,
+    mode: str = 'train'
+):
     return nt.stax.serial(
         nt.stax.Dense(512, W_std=W_std, b_std=b_std),
         nt.stax.Relu(),

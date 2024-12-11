@@ -2,7 +2,7 @@
 import jax
 from jax import numpy as jnp
 from jaxtyping import Float, Array, Scalar
-import equinox as eqx
+import lineax as lx
 import einops as ein
 
 
@@ -51,7 +51,8 @@ def kreg(
         var: Predicted variance for test points.
     """
     reg *= ein.einsum(k11, 'i i ->')
-    sol = jax.scipy.linalg.solve(k11 + reg*jnp.eye(len(k11)), k12, assume_a='pos')
+    # sol = jax.scipy.linalg.solve(k11 + reg*jnp.eye(len(k11)), k12, assume_a='pos')
+    sol, _, _, _ = jnp.linalg.lstsq(k11 + reg*jnp.eye(len(k11)), k12)
     mean = ein.einsum(sol, y, 'train test, train d-> test d')
     var = k22 - ein.einsum(sol, k12, 'train t1, train t2 -> t1 t2')
     return mean, var
