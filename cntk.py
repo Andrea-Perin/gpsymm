@@ -39,11 +39,11 @@ lab_path = Path(cfg['paths']['lab_path'])
 res_path = Path(cfg['paths']['res_path'])
 
 # %% File-specific stuff
-IS_FC = args.gap
+IS_GAP = args.gap
 REG = 1e-10
 W_std = 1.
 b_std = 1.
-res_path = res_path / ('cntk_' + ('fc' if IS_FC else 'gap') + '_' + f'{args.kernel_size}')
+res_path = res_path / ('cntk_' + ('gap' if IS_GAP else 'fc') + '_' + f'{args.kernel_size}')
 res_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -57,7 +57,7 @@ conv =  nt.stax.serial(
     nt.stax.Conv(out_chan=64, filter_shape=(args.kernel_size, args.kernel_size), padding='CIRCULAR', W_std=W_std, b_std=None),
     nt.stax.Relu()
 )
-pool = nt.stax.Identity() if IS_FC else nt.stax.GlobalAvgPool()
+pool = nt.stax.GlobalAvgPool() if IS_GAP else nt.stax.Identity()
 init_fn, apply_fn, kernel_fn = nt.stax.serial(
     conv,
     pool,
