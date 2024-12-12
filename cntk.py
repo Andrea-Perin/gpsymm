@@ -23,6 +23,8 @@ parser.add_argument('--gap', action='store_true',
                     help='whether to use Global Average Pooling layer (default: False)')
 parser.add_argument('--kernel-size', type=int, default=3,
                     help='size of the convolutional kernel (default: 3)')
+parser.add_argument('--demean', action='store_true',
+                    help='whether to demean the data before putting it on the sphere (default: False)')
 args = parser.parse_args()
 
 
@@ -39,11 +41,12 @@ lab_path = Path(cfg['paths']['lab_path'])
 res_path = Path(cfg['paths']['res_path'])
 
 # %% File-specific stuff
+DEMEAN = args.demean
 IS_GAP = args.gap
 REG = 1e-10
 W_std = 1.
 b_std = 1.
-res_path = res_path / ('cntk_' + ('gap' if IS_GAP else 'fc') + '_' + f'{args.kernel_size}')
+res_path = res_path / ('cntk_' + ('gap' if IS_GAP else 'fc') + '_' + f'{args.kernel_size}' + ('_demean' if DEMEAN else ''))
 res_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -94,7 +97,10 @@ def get_data(
     orbits_A = make_rotation_orbit(images_A, angles)
     orbits_B = make_rotation_orbit(images_B, angles)
     data, ps = ein.pack((orbits_A, orbits_B), 'pair * angle width height')
-    data = normalize_mnist(ein.rearrange(data, 'p d a w h -> (p d a) w h'))
+    data = ein.rearrange(data, 'p d a w h -> (p d a) w h')
+    if DEMEAN:
+        data -= ein.reduce(data, 'pda w h -> pda 1 1', 'mean')
+    data = normalize_mnist(data)
     return ein.rearrange(
         data,
         '(pair digit angle) width height -> pair (angle digit) width height 1',
