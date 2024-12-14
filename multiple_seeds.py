@@ -163,8 +163,8 @@ for angle_idx, ax in enumerate(grid):
     ax.set_title(f'$N_{{rot}}={{{ANGLES[angle_idx]}}}$', fontsize=10)
 
 # Add labels
-fig.text(0.5, 0.1, 'Symm. empirical error (NTK)', ha='center', fontsize=10)
-fig.text(0.0, 0.5, 'Spectral error', va='center', rotation='vertical', fontsize=10)
+fig.text(0.5, 0.1, 'Symmetrized exact error (NTK)', ha='center', fontsize=10)
+fig.text(0.0, 0.5, 'Spectral error (NTK)', va='center', rotation='vertical', fontsize=10)
 
 # Colorbar
 grid.cbar_axes[0].colorbar(sc, format=lambda x, _: f'{100*x:.0f}%')
@@ -199,8 +199,8 @@ ax.set_yticks([0, 1, 2])
 ax.set_title(f'$N_{{rot}}={{{ANGLES[args.rot_idx]}}}$', fontsize=10)
 
 # Add labels
-ax.set_xlabel('Empirical error (NTK)', fontsize=10)
-ax.set_ylabel('Spectral error', fontsize=10)
+ax.set_xlabel('Exact error (NTK)', fontsize=10)
+ax.set_ylabel('Spectral error (NTK)', fontsize=10)
 
 # Colorbar
 cbar = plt.colorbar(sc, fraction=0.046, pad=0.04)

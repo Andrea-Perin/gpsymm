@@ -68,7 +68,7 @@ our_errors = jnp.array(our_errors).flatten()
 
 # %% PANEL B
 fig, ax = plt.subplots(figsize=(5*cm, 8*cm))
-ax.plot(Ns, jnp.log(errors), 'o-', color='black', label=r'Emp.')
+ax.plot(Ns, jnp.log(errors), 'o-', color='black', label=r'Stand.')
 ax.plot(Ns, jnp.log(our_errors), '.-', color=colors[0], label=r'Ours')
 ax.set_xlabel(r'$N$')
 ax.set_ylabel(r'$\log(\varepsilon)$', ha='left', rotation=0, y=1, labelpad=0)
@@ -249,7 +249,7 @@ plt.show()
 # %% PANEL E
 figsize = (5*cm, 8*cm)
 fig, ax = plt.subplots(figsize=figsize)
-ax.plot(jnp.log(ds), jnp.log(errors), 'o-', color='black', label=r'Emp.')
+ax.plot(jnp.log(ds), jnp.log(errors), 'o-', color='black', label=r'Stand.')
 ax.plot(jnp.log(ds), jnp.log(our_errors), '.-', color=colors[0], label=r'Ours')
 ax.set_xlabel(r'$\log\Delta$')
 ax.set_ylabel(r'$\log(\varepsilon)$', ha='left', rotation=0, y=1, labelpad=0)

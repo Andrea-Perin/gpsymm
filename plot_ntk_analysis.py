@@ -14,7 +14,7 @@ from utils.plot_utils import cm, add_inner_title, semaphore, format_axis_scienti
 plt.style.use('myplots.mlpstyle')
 
 
-def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
+def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift, sci):
     """Create and save plots B through E from the results."""
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -33,8 +33,8 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
         fig, 111, nrows_ncols=(1, 1), axes_pad=0.1, label_mode="L", share_all=True,
         cbar_location="right", cbar_mode="single", cbar_size="5%", cbar_pad=0.1, aspect=False)
     grid[0].set_title(f"$N_{{{transf_type}}}={{{n_rotations[rot_idx]}}}$", fontsize=10)
-    grid[0].set_xlabel("Empirical error (NTK)")
-    grid[0].set_ylabel("Spectral error")
+    grid[0].set_xlabel("Exact error (NTK)")
+    grid[0].set_ylabel("Spectral error (NTK)")
     norm = plt.Normalize(vmin=0, vmax=2)
     im = grid[0].scatter(
         empirical_errors[rot_idx],
@@ -52,10 +52,13 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
     )
     cbar.ax.tick_params(size=0)
     cbar.ax.set_yticklabels((0, 1, 2), va='center')
-    cmax = max(empirical_errors[rot_idx].max(), spectral_errors[rot_idx].max())
+    cmax = max(empirical_errors[rot_idx].max(), spectral_errors[rot_idx].max(), 2)
     grid[0].plot([0, cmax], [0, cmax], color='black', alpha=1, lw=.75, ls='--')
-    grid[0].set_xlim((0, 2))
-    grid[0].set_ylim((0, 2))
+    ticks = list(range(0, int(cmax)+1))
+    grid[0].set_xticks(ticks)
+    grid[0].set_yticks(ticks)
+    grid[0].set_xlim((0, None))
+    grid[0].set_ylim((0, None))
 
     # # INSET CODE IF NEEDED
     # inset_ax = grid[0].inset_axes([0.45, 0.45, 0.5, 0.5])  # [x, y, width, height] in axes coordinates
@@ -74,6 +77,8 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
     # inset_ax.set_yticks([0, 0.1])
     # # Add connecting lines
     # grid[0].indicate_inset_zoom(inset_ax, edgecolor="black")
+    # # END INSET CODE
+
     plt.tight_layout(pad=0.4)
     plt.savefig(output_path / f'panelB_{n_rotations[rot_idx]}.pdf')
     plt.close()
@@ -120,31 +125,38 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
     im1 = grid[0].contourf(xi, yi, zi_spec, levels=levels, cmap='viridis', vmin=vmin, vmax=vmax)
     grid[0].set_xlabel(r'$\lambda^{-1}_{N}$')
     grid[0].set_ylabel(r'$\langle\lambda^{-1}\rangle$')
-    add_inner_title(grid[0], 'Spectral error', loc='upper right')
+    add_inner_title(grid[0], 'Spectral error (NTK)', loc='upper right')
     add_inner_title(grid[0], titlestr, loc='lower right')
 
-    # sciexp = format_axis_scientific(grid[0], axis='y', pos=(-.139, 1.))
-    # sciexp.set_fontsize(8)
-    # sciexp.set_rotation(90)
-    # sciexp.set_verticalalignment('center')
+    if sci:
+        sciexpy = format_axis_scientific(grid[0], axis='y', pos=(-.2, 1.05))
+        sciexpy.set_fontsize(8)
+        sciexpy.set_verticalalignment('center')
     for tick in grid[0].get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment('center')
+        tick.set_fontsize(8)
+    for tick in grid[0].get_xticklabels():
         tick.set_fontsize(8)
 
     im2 = grid[1].contourf(xi, yi, zi_emp, levels=levels, cmap='viridis', vmin=vmin, vmax=vmax)
     grid[1].set_xlabel('$\lambda^{-1}_{N}$')
     grid[1].set_ylabel(r'$\langle\lambda^{-1}\rangle$')
-    add_inner_title(grid[1], 'Empirical error', loc='upper right')
+    add_inner_title(grid[1], 'Exact error (NTK)', loc='upper right')
     add_inner_title(grid[1], titlestr, loc='lower right')
 
-    # sciexp = format_axis_scientific(grid[1], axis='y', pos=(-.139, 1.))
-    # sciexp.set_fontsize(8)
-    # sciexp.set_rotation(90)
-    # sciexp.set_verticalalignment('center')
+    if sci:
+        sciexpy = format_axis_scientific(grid[1], axis='y', pos=(-.2, 1.05))
+        sciexpy.set_fontsize(8)
+        sciexpy.set_verticalalignment('center')
+        sciexpx = format_axis_scientific(grid[1], axis='x', pos=(.85, -.175))
+        sciexpx.set_fontsize(8)
+        sciexpx.set_verticalalignment('center')
     for tick in grid[1].get_yticklabels():
         tick.set_rotation(90)
         tick.set_verticalalignment('center')
+        tick.set_fontsize(8)
+    for tick in grid[1].get_xticklabels():
         tick.set_fontsize(8)
 
     cbar = grid.cbar_axes[0].colorbar(im2)
@@ -175,7 +187,8 @@ def plot_panels(results, n_rotations, rot_idx, output_path, alpha, shift):
     cbar = grid.cbar_axes[0].colorbar(
         plt.cm.ScalarMappable(norm=im.norm, cmap=im.get_cmap()), alpha=1.0
     )
-    format_axis_scientific(grid[0], axis='x', pos=(1., -.14))
+    if sci:
+        format_axis_scientific(grid[0], axis='x', pos=(1., -.14))
     # format_axis_scientific(grid[0], axis='y', pos=(-.14, 1.05))
     # grid[0].ticklabel_format(style='sci', axis='x', scilimits=(0,0))
     # grid[0].get_xaxis().get_offset_text().set_visible(False)
@@ -222,6 +235,8 @@ def main():
                        help='Transparency of scatter dots (default: .1)')
     parser.add_argument('--shift', action='store_true',
                        help='whether to use shifts (default: False)')
+    parser.add_argument('--sci', action='store_true',
+                       help='whether to use sci-notation in panel C (default: False)')
     args = parser.parse_args()
 
     # Load config and then results
@@ -230,10 +245,9 @@ def main():
     n_shifts = cfg['params']['shifts']
     results = np.load(args.results_file)
     num_things = n_shifts if args.shift else n_rotations
-    print(num_things)
 
     # Create plots
-    plot_panels(results, num_things, args.idx, args.output_path, alpha=args.alpha, shift=args.shift)
+    plot_panels(results, num_things, args.idx, args.output_path, alpha=args.alpha, shift=args.shift, sci=args.sci)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,9 @@
 # %% Plotting principal components
+import jax
 from jax import numpy as jnp
 import einops as ein
 from pathlib import Path
+import functools as ft
 
 from utils.mnist_utils import load_images, load_labels, normalize_mnist
 from utils.data_utils import make_rotation_orbit
@@ -89,6 +91,76 @@ def main():
     plt.savefig(out_path / f'pca_plot_{N_ROTATIONS}.pdf', bbox_inches='tight') #, pad_inches=0)
     # plt.show()
     # plt.close()
+
+
+    # Now same thing, but with shifts
+    N_SHIFTS = 7
+
+    # %% PANEL A to start
+    shifts = jnp.arange(28)
+    digit_a = images[labels == label_a][digit_selector:digit_selector+1]
+    digit_b = images[labels == label_b][digit_selector:digit_selector+1]
+    make_shift_orbit = ft.partial(jnp.roll, axis=-1)
+
+    digit_a_orbits = jax.vmap(make_shift_orbit, in_axes=(None, 0))(digit_a, shifts)
+    digit_b_orbits = jax.vmap(make_shift_orbit, in_axes=(None, 0))(digit_b, shifts)
+    digit_a_orbits = normalize_mnist(digit_a_orbits[:, 0])
+    digit_b_orbits = normalize_mnist(digit_b_orbits[:, 0])
+
+    data, ps = ein.pack( (digit_a_orbits, digit_b_orbits), '* n w h' )
+    data = ein.rearrange(data, 'd n w h -> (d n) (w h)')
+    u, s, vh = jnp.linalg.svd(data, full_matrices=True)
+    comps = jnp.array([0, 1, 2])
+    pcs = ein.einsum(u[:, comps], s[comps], 'i j, j -> i j')
+
+    # Extract points for both orbits
+    idxs = jnp.arange(0, 28+1, 4)
+    pcs_a = pcs[:28]
+    pcs_b = pcs[28:]
+    pts_a = jnp.take(pcs_a, idxs, axis=0, mode='wrap')
+    pts_b = jnp.take(pcs_b, idxs, axis=0, mode='wrap')
+
+    # Main scatter plot
+    fig = plt.figure(figsize=(5.75*cm, 5*cm))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.set_position((0, 0, 1, 1))
+    ax.plot(pts_a[:, 0], pts_b[:, 1], pts_a[:, 2], 'o--', lw=.3, markersize=1.5, label=label_a)
+    ax.plot(pts_b[:, 0], pts_b[:, 1], pts_b[:, 2], 'o--', lw=.3, markersize=1.5, label=label_b)
+    # show PCA basis elements
+    vmax = max(float(vh[:3].max()), float(-vh[:3].min()))
+    vmin = -vmax
+    inset_pc1 = ax.inset_axes((.25, 0.1, 0.15, 0.15), transform=ax.transAxes)
+    inset_pc1.set_title("PC1", fontsize=10, y= -.5, va='center', transform=inset_pc1.transAxes)
+    add_spines(inset_pc1)
+    inset_pc1.imshow(-vh[0].reshape(28, 28), cmap='RdBu', vmin=vmin, vmax=vmax)  # adjust index as needed
+
+    inset_pc2 = ax.inset_axes((.75, 0.1, 0.15, 0.15))
+    inset_pc2.set_title("PC2", fontsize=10, y=-.5, va='center', transform=inset_pc2.transAxes)
+    add_spines(inset_pc2)
+    inset_pc2.imshow(vh[1].reshape(28, 28), cmap='RdBu', vmin=vmin, vmax=vmax)  # adjust index as needed
+
+    inset_pc3 = ax.inset_axes((.9, 0.5, 0.15, 0.15))
+    inset_pc3.set_title("PC3", fontsize=10, y=-.5, va='center', transform=inset_pc3.transAxes,
+        path_effects=[withStroke(linewidth=3, foreground='w')])
+    add_spines(inset_pc3)
+    inset_pc3.imshow(vh[2].reshape(28, 28), cmap='RdBu', vmin=vmin, vmax=vmax)  # adjust index as needed
+    # Show digits
+    inset1 = ax.inset_axes((0.05, 0.75, 0.15, 0.15))
+    inset1.set_axis_off()
+    inset1.imshow(digit_a[0], cmap='gray')
+    inset2 = ax.inset_axes((0.70, 0.75, 0.15, 0.15))
+    inset2.set_axis_off()
+    inset2.imshow(digit_b[0], cmap='gray')
+    # Plot images in insets
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    plt.tight_layout(pad=0)
+    plt.savefig(out_path / f'pca_plot_{N_SHIFTS}.pdf', bbox_inches='tight') #, pad_inches=0)
+    # plt.show()
+    # plt.close()
+
 
 
 if __name__ == "__main__":
